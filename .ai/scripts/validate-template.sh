@@ -24,17 +24,17 @@ echo ""
 
 check_pass() {
     echo -e "${GREEN}✓${NC} $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 check_fail() {
     echo -e "${RED}✗${NC} $1"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 }
 
 check_warn() {
     echo -e "${YELLOW}⚠${NC} $1"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 }
 
 # 1. Required directories
@@ -73,7 +73,7 @@ echo -e "${BLUE}Checking agent files...${NC}"
 AGENT_COUNT=0
 for f in "$AI_DIR"/agents/*.agent.md; do
     [ -f "$f" ] || continue
-    ((AGENT_COUNT++))
+    AGENT_COUNT=$((AGENT_COUNT + 1))
     BASENAME=$(basename "$f")
 
     # Check YAML frontmatter
@@ -100,7 +100,7 @@ echo -e "${BLUE}Checking workflow files...${NC}"
 WORKFLOW_COUNT=0
 for f in "$AI_DIR"/workflows/*.md; do
     [ -f "$f" ] || continue
-    ((WORKFLOW_COUNT++))
+    WORKFLOW_COUNT=$((WORKFLOW_COUNT + 1))
     BASENAME=$(basename "$f")
 
     if head -1 "$f" | grep -q '^---'; then
@@ -121,7 +121,7 @@ echo -e "${BLUE}Checking skill modules...${NC}"
 SKILL_COUNT=0
 for d in "$AI_DIR"/skills/*/; do
     [ -d "$d" ] || continue
-    ((SKILL_COUNT++))
+    SKILL_COUNT=$((SKILL_COUNT + 1))
     SKILL_NAME=$(basename "$d")
 
     if [ -f "$d/SKILL.md" ]; then

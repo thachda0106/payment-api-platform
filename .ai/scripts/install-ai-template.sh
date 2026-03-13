@@ -76,15 +76,15 @@ for tool in "${DETECTED[@]}"; do
     if [ -f "$ADAPTER_SCRIPT" ]; then
         echo -e "${BLUE}--- Installing $tool adapter ---${NC}"
         if bash "$ADAPTER_SCRIPT"; then
-            ((INSTALLED++))
+            INSTALLED=$((INSTALLED + 1))
         else
             echo -e "${RED}Failed to install $tool adapter${NC}"
-            ((FAILED++))
+            FAILED=$((FAILED + 1))
         fi
         echo ""
     else
         echo -e "${YELLOW}No adapter found for: $tool (expected $ADAPTER_SCRIPT)${NC}"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
     fi
 done
 

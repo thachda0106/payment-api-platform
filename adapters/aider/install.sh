@@ -2,7 +2,7 @@
 # Aider Adapter — Install Script
 # Reads .ai/ canonical structure and generates .aider.conf.yml + CONVENTIONS.md for Aider
 #
-# Usage: bash adapters/aider/install.sh
+# Usage: bash adapters/aider/install.sh [--dry-run]
 
 set -euo pipefail
 
@@ -10,53 +10,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AI_DIR="$PROJECT_ROOT/.ai"
 
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Load shared library
+source "$PROJECT_ROOT/.ai/scripts/_lib.sh"
+parse_flags "$@"
 
 echo -e "${BLUE}=== Aider Adapter Install ===${NC}"
 echo ""
 
 if [ ! -d "$AI_DIR" ]; then
-    echo -e "${YELLOW}ERROR: .ai/ directory not found at $AI_DIR${NC}"
+    echo -e "${RED}ERROR: .ai/ directory not found at $AI_DIR${NC}"
     exit 1
 fi
 
-# 1. Generate CONVENTIONS.md (Aider reads this via --read flag)
+# 1. Generate CONVENTIONS.md (using shared lib)
 echo -e "${GREEN}✓${NC} Generating CONVENTIONS.md"
-{
-    echo "# AI Coding Conventions"
-    echo ""
-    echo "<!-- Auto-generated from .ai/context/ by Aider adapter -->"
-    echo "<!-- Do not edit directly. Edit .ai/context/ files and re-run adapter. -->"
-    echo ""
-
-    if [ -f "$AI_DIR/context/PROJECT.md" ]; then
-        cat "$AI_DIR/context/PROJECT.md"
-        echo ""
-        echo "---"
-        echo ""
-    fi
-
-    if [ -f "$AI_DIR/context/CONVENTIONS.md" ]; then
-        cat "$AI_DIR/context/CONVENTIONS.md"
-        echo ""
-        echo "---"
-        echo ""
-    fi
-
-    if [ -f "$AI_DIR/context/BOUNDARIES.md" ]; then
-        cat "$AI_DIR/context/BOUNDARIES.md"
-        echo ""
-    fi
-
-    if [ -f "$AI_DIR/prompts/system.md" ]; then
-        echo "---"
-        echo ""
-        cat "$AI_DIR/prompts/system.md"
-    fi
-} > "$PROJECT_ROOT/CONVENTIONS.md"
+merge_context_files "$AI_DIR" "$PROJECT_ROOT/CONVENTIONS.md" "# AI Coding Conventions" "Aider"
 
 # 2. Generate .aider.conf.yml
 echo -e "${GREEN}✓${NC} Generating .aider.conf.yml"

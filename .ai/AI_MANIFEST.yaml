@@ -44,5 +44,5 @@ modules:
     - validate-architecture
     - verify-bug-regression
 
-# Operating model
-operating_model: "plan-review-execute-verify"
+# Operating model — 5 phases
+operating_model: "plan-review-execute-verify-reflect"

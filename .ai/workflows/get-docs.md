@@ -22,7 +22,7 @@ Provide the library name as input:
 
 ## Notes
 
-- Use documentation retrieval tools if available (e.g., Context7 MCP)
-- If no documentation tool is available, use web search
+- Use documentation retrieval tools if available (e.g., MCP documentation servers)
+- If no documentation tool is available, use web search or official documentation sites
 - Summarize for the project's specific tech stack and patterns
 - Focus on API details, configuration, and integration patterns

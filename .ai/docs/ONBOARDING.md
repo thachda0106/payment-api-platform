@@ -74,3 +74,36 @@ description: What this skill does
 ## Step-by-Step Procedure
 ...
 ```
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Install adapters (auto-detect) | `bash .ai/scripts/install-ai-template.sh` |
+| Install specific adapter | `bash adapters/<tool>/install.sh` |
+| Remove adapter output | `bash adapters/<tool>/clean.sh` |
+| Validate template | `bash .ai/scripts/validate-template.sh` |
+| Migrate from Claude Code | `bash .ai/scripts/migrate-from-claude.sh` |
+| Preview install (no changes) | `bash .ai/scripts/install-ai-template.sh --dry-run` |
+
+## Troubleshooting
+
+### "No AI tools detected automatically"
+**Cause:** The install script auto-detects by looking for tool-specific directories or CLI commands.
+**Fix:** Specify the tool explicitly:
+```bash
+bash .ai/scripts/install-ai-template.sh antigravity cursor
+```
+
+### "ERROR: .ai/ directory not found"
+**Cause:** Script is not running from the project root, or `.ai/` was not copied.
+**Fix:** Ensure `.ai/` exists at the project root and run from the project root.
+
+### Validation errors after install
+**Cause:** Context files may still have unresolved `{{placeholders}}`.
+**Fix:** Edit `.ai/context/PROJECT.md`, `CONVENTIONS.md`, and `BOUNDARIES.md` and replace all `{{...}}` placeholders with your project's actual values.
+
+### Adapter output conflicts in git
+**Cause:** Generated files are being tracked.
+**Fix:** Ensure `.gitignore` includes generated adapter output (see the template `.gitignore`).
+

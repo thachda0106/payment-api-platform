@@ -2,7 +2,7 @@
 description: Master AI-assisted development lifecycle — plan, review, execute, verify
 ---
 
-# AI Workflow — Plan → Review → Execute → Verify
+# AI Workflow — Plan → Review → Execute → Verify → Reflect
 
 This is the **mandatory workflow** for all non-trivial tasks. It defines the execution lifecycle that any AI assistant must follow.
 
@@ -53,7 +53,7 @@ Proceed with implementation:
 - Include tests and validation
 - Do not introduce scope creep
 
-## STEP 5 — VALIDATION & DONE
+## STEP 5 — VALIDATION
 
 Validate:
 - Tests passing
@@ -65,6 +65,17 @@ If something deviates:
 - Propose scratchpad update
 - Check logs / metrics (if applicable)
 
+## STEP 6 — REFLECT
+
+After validation is complete, reflect on the task:
+
+1. **Review execution** — Did the implementation match the plan? Note any deviations.
+2. **Assess quality** — Were there unexpected complexities? Could the approach be improved?
+3. **Capture learnings** — Document insights using `prompts/templates/reflection.md`
+4. **Suggest improvements** — If workflows, skills, or conventions could be refined, note suggestions for human review.
+
+> This step is optional for trivial tasks but mandatory for multi-file changes and architectural decisions.
+
 ## Dev Checklist (Mental Model)
 
 Before coding, ask:
@@ -75,4 +86,9 @@ Before coding, ask:
 
 If any answer is NO → **STOP**.
 
-> **GOLDEN RULE**: Scratchpad is the source of truth. Plans explain HOW. Code is the last step.
+After coding, ask:
+- ❓ Did we verify the changes?
+- ❓ Did we reflect on what we learned?
+
+> **GOLDEN RULE**: Scratchpad is the source of truth. Plans explain HOW. Code is the last step. Reflection closes the loop.
+

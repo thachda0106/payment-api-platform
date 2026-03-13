@@ -13,6 +13,7 @@ Every adapter directory must contain:
 | File | Purpose |
 |------|---------|
 | `install.sh` | Reads `.ai/` and generates tool-native directory structure |
+| `clean.sh` | Removes all generated tool-native files (reverse of install) |
 | `mapping.yaml` | Declares path and format mappings from `.ai/` → tool-native |
 | `templates/` | Template files for generating tool-specific output (optional) |
 
@@ -35,12 +36,14 @@ mappings:
 
 The install script must:
 
-1. Read `.ai/` directory as input (never modify it)
-2. Create tool-native directories
-3. Copy/transform files per `mapping.yaml`
-4. Be idempotent (safe to run multiple times)
-5. Print what it creates
-6. Exit 0 on success, non-zero on failure
+1. Source shared library: `source "$PROJECT_ROOT/.ai/scripts/_lib.sh"`
+2. Read `.ai/` directory as input (never modify it)
+3. Use `merge_context_files()` from `_lib.sh` for context merging
+4. Create tool-native directories
+5. Copy/transform files per `mapping.yaml`
+6. Be idempotent (safe to run multiple times)
+7. Print what it creates
+8. Exit 0 on success, non-zero on failure
 
 ## Supported Transforms
 

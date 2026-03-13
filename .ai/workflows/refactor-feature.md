@@ -1,6 +1,6 @@
 ---
 description: Refactor code for clarity and maintainability without changing behavior
-agent: code-reviewer
+agent: feature-builder
 ---
 
 # Refactor Feature

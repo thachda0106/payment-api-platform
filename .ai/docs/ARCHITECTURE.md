@@ -20,18 +20,23 @@ This template separates **AI logic** from **AI tooling** using an adapter patter
 | `.ai/skills/` | Atomic, reusable procedures (how to do it) |
 | `.ai/prompts/` | Reusable prompt fragments and templates |
 | `.ai/scripts/` | Automation scripts for install, validation, migration |
+| `.ai/scripts/_lib.sh` | Shared shell utilities (colors, context merge, manifest updates) |
 | `.ai/docs/` | Human documentation |
 | `adapters/` | Tool-specific translation layers |
 
 ## Operating Model
 
-Every non-trivial task follows:
+Every non-trivial task follows the **5-phase lifecycle**:
 
 ```
-Plan → Review (HARD STOP) → Execute → Verify
+Plan → Review (HARD STOP) → Execute → Verify → Reflect
 ```
 
-The AI assistant creates a scratchpad, stops for human approval, then implements and verifies.
+1. The AI creates a **scratchpad** (Plan)
+2. Stops for **human approval** (Review)
+3. **Implements** the plan (Execute)
+4. **Validates** with tests, lint, type checks (Verify)
+5. **Reflects** on execution quality and captures learnings (Reflect)
 
 ## Module Relationships
 
@@ -44,10 +49,20 @@ The AI assistant creates a scratchpad, stops for human approval, then implements
 │ workflows/ → Step-by-step automation     │
 │ skills/    → Referenced by agents        │
 │ prompts/   → Templates for output        │
+│ scripts/   → _lib.sh shared utilities    │
 └───────────────┬──────────────────────────┘
                 │
       ┌─────────┴─────────┐
       │  adapters/ (thin)   │
+      ├─────────────────────┤
+      │ mapping.yaml  (spec)│
+      │ install.sh (sources │
+      │   _lib.sh)          │
+      │ clean.sh  (cleanup) │
+      └─────────────────────┘
+                │
+      ┌─────────┴─────────┐
+      │ Tool-native output  │
       ├─────────────────────┤
       │ claude/  → .claude/ │
       │ antigravity → .agent│
@@ -56,9 +71,25 @@ The AI assistant creates a scratchpad, stops for human approval, then implements
       └─────────────────────┘
 ```
 
+## Shared Library (`_lib.sh`)
+
+All adapter `install.sh` scripts and template scripts source `.ai/scripts/_lib.sh`, which provides:
+
+| Function | Purpose |
+|----------|---------|
+| `merge_context_files()` | Merge context + system prompt into a single output file |
+| `copy_skills()` | Copy skill directories preserving structure |
+| `update_manifest_adapters()` | Write installed adapter list to `AI_MANIFEST.yaml` |
+| `parse_flags()` | Parse common flags like `--dry-run` |
+| Color constants | `GREEN`, `BLUE`, `YELLOW`, `RED`, `NC` |
+
+This eliminates code duplication across adapters and ensures consistent behavior.
+
 ## Key Design Decisions
 
 1. **`.ai/` is never modified by adapters** — adapters only read from it
 2. **Skills use generic verbs** — "Search", "Read", "Edit" — not tool-specific names
 3. **Workflows are adapter-compatible by default** — YAML frontmatter works in both Claude Code and Antigravity
 4. **Context files split responsibilities** — PROJECT (what), CONVENTIONS (how), BOUNDARIES (don't)
+5. **Shared shell library** — `_lib.sh` centralizes common logic, adapters stay thin
+6. **Every adapter has `clean.sh`** — generated output can be removed cleanly

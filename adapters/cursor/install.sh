@@ -2,7 +2,7 @@
 # Cursor Adapter — Install Script
 # Reads .ai/ canonical structure and generates .cursorrules for Cursor IDE
 #
-# Usage: bash adapters/cursor/install.sh
+# Usage: bash adapters/cursor/install.sh [--dry-run]
 
 set -euo pipefail
 
@@ -10,21 +10,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AI_DIR="$PROJECT_ROOT/.ai"
 
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Load shared library
+source "$PROJECT_ROOT/.ai/scripts/_lib.sh"
+parse_flags "$@"
 
 echo -e "${BLUE}=== Cursor Adapter Install ===${NC}"
 echo ""
 
 if [ ! -d "$AI_DIR" ]; then
-    echo -e "${YELLOW}ERROR: .ai/ directory not found at $AI_DIR${NC}"
+    echo -e "${RED}ERROR: .ai/ directory not found at $AI_DIR${NC}"
     exit 1
 fi
 
 # Cursor uses a single .cursorrules file at the project root.
-# We merge all context files + system prompt into it.
+# We merge all context files + system prompt + agent summaries into it.
 echo -e "${GREEN}✓${NC} Generating .cursorrules from context files"
 {
     echo "# Cursor AI Rules"
@@ -62,7 +61,6 @@ echo -e "${GREEN}✓${NC} Generating .cursorrules from context files"
     for f in "$AI_DIR"/agents/*.agent.md; do
         [ -f "$f" ] || continue
         AGENT_NAME=$(basename "$f" .agent.md)
-        # Extract description from frontmatter
         DESCRIPTION=$(grep '^description:' "$f" | head -1 | sed 's/^description: *//')
         echo "- **$AGENT_NAME**: $DESCRIPTION"
     done

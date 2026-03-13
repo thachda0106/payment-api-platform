@@ -11,7 +11,8 @@ An adapter is a thin translation layer that reads the canonical `.ai/` directory
 ```
 adapters/<tool-name>/
 ├── mapping.yaml      # Required: path and format mappings
-├── install.sh        # Required: installation script
+├── install.sh        # Required: installation script (sources _lib.sh)
+├── clean.sh          # Required: cleanup script to remove generated output
 └── templates/        # Optional: template files for generation
 ```
 
@@ -33,7 +34,9 @@ mappings:
 ### 3. Implement `install.sh`
 
 Your script must:
+- Source shared library: `source "$PROJECT_ROOT/.ai/scripts/_lib.sh"`
 - Read `.ai/` as input (never modify it)
+- Use `merge_context_files()` from `_lib.sh` for context merging
 - Create tool-native directories
 - Copy/transform files per mapping
 - Be idempotent (safe to re-run)
@@ -58,6 +61,7 @@ Not all tools support all features. Use `null` target for unsupported features:
 | Workflows | ✅ commands/ | ✅ workflows/ | ❌ | ❌ |
 | Skills | ✅ | ✅ | ❌ | ❌ |
 | Scripts | ✅ | ✅ | ❌ | ❌ |
+| Clean/uninstall | ✅ | ✅ | ✅ | ✅ |
 
 ## See Also
 

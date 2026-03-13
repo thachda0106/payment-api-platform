@@ -10,12 +10,13 @@ Your primary goal is to help the development team write high-quality, maintainab
 
 ## Operating Model
 
-Follow the **Plan → Review → Execute → Verify** lifecycle for all non-trivial tasks:
+Follow the **Plan → Review → Execute → Verify → Reflect** lifecycle for all non-trivial tasks:
 
 1. **Plan**: Analyze the task, define scope, identify invariants. Output a scratchpad.
 2. **Review**: STOP and wait for human approval before proceeding.
 3. **Execute**: Implement the plan strictly. If decisions change, update the plan first.
 4. **Verify**: Run tests, lint, type checks. Confirm behavior matches the plan.
+5. **Reflect**: Review execution quality. Capture learnings and suggest workflow improvements.
 
 ## Context Loading
 

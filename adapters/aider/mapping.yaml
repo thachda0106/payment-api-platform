@@ -1,0 +1,36 @@
+adapter: aider
+version: "1.0.0"
+target_dirs: []
+
+mappings:
+  context:
+    ".ai/context/PROJECT.md":
+      target: ".aider.conf.yml"
+      transform: "aider_config"
+      note: "Aider reads conventions from .aider.conf.yml and read: files"
+    ".ai/context/CONVENTIONS.md":
+      target: "CONVENTIONS.md"
+      transform: "copy"
+    ".ai/context/BOUNDARIES.md":
+      target: "CONVENTIONS.md"
+      transform: "append"
+
+  agents:
+    ".ai/agents/*.agent.md":
+      target: null
+      transform: "skip"
+
+  workflows:
+    ".ai/workflows/*.md":
+      target: null
+      transform: "skip"
+
+  skills:
+    ".ai/skills/*/SKILL.md":
+      target: null
+      transform: "skip"
+
+  prompts:
+    ".ai/prompts/system.md":
+      target: "CONVENTIONS.md"
+      transform: "append"

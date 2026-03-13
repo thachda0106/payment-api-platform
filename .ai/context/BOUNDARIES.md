@@ -31,6 +31,14 @@
 - If a file changes externally, re-read before writing
 - When multiple files are related, read all first, then write one by one
 
+### Skipping Approval Gates
+- **Never skip a human approval gate** — this is a critical safety violation
+- Never generate SCRATCHPAD and PLAN in the same response
+- Never generate PLAN and TASKS in the same response
+- Never write implementation code before TASKS are approved
+- Never run all workflow phases in a single execution
+- Never assume approval — wait for explicit user confirmation
+
 ## MCP / External Tool Usage Rules
 
 ### Documentation Tools (e.g., Context7)
@@ -50,7 +58,18 @@
 
 ## Human Review Checkpoints
 
-- Scratchpad/planning phase: **HARD STOP** — requires human approval
+> [!CAUTION]
+> Every checkpoint below is a **HARD STOP**. The AI must pause and wait for explicit human approval.
+
+| # | Checkpoint | Output Artifact | AI Must Say |
+|---|-----------|----------------|-------------|
+| 1 | After SCRATCHPAD phase | `SCRATCHPAD.md` | "Please review the scratchpad. Reply APPROVE to continue." |
+| 2 | After PLAN phase | `PLAN.md` | "Please review the plan. Reply APPROVE to continue." |
+| 3 | After TASKS phase | `TASKS.md` | "Please review the tasks. Reply APPROVE to continue." |
+| 4 | After IMPLEMENTATION | Completed code | "Implementation complete. Please review before final testing." |
+
+Additional review triggers:
 - Architecture decisions: require explicit approval
 - Breaking changes: require explicit approval
 - New dependencies: verify existing alternatives first
+- If a decision changes during execution: update scratchpad and STOP for re-approval

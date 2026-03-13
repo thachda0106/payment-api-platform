@@ -7,23 +7,95 @@ agent: test-engineer
 
 Generate comprehensive tests for the selected code following project testing standards.
 
-## Steps
+> [!CAUTION]
+> This workflow requires human approval between every phase.
+> Do NOT skip phases. Do NOT combine phases into a single response.
 
-### 1. Select Test Type
+---
 
-Ask user which test type to generate:
-- **Unit Test** — Isolated module testing with mocked dependencies (default)
-- **Integration Test** — Full flow with real dependencies
-- **E2E Test** — End-to-end API/UI testing
+## PHASE 1 — SCRATCHPAD (Exploration)
 
-### 2. Analyze Target Code
+**No code or plans in this phase. Analysis only.**
 
-- Read the code to be tested
-- Understand business logic and edge cases
-- Identify dependencies to mock
-- Find existing test patterns for consistency
+1. Ask user which test type to generate:
+   - **Unit Test** — Isolated module testing with mocked dependencies (default)
+   - **Integration Test** — Full flow with real dependencies
+   - **E2E Test** — End-to-end API/UI testing
+2. Read the code to be tested
+3. Understand business logic and edge cases
+4. Identify dependencies to mock
+5. Find existing test patterns for consistency
+6. Write analysis into `SCRATCHPAD.md`
 
-### 3. Generate Tests
+**Output**: `SCRATCHPAD.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 1
+
+```
+Say: "Phase 1 (Scratchpad) complete. Please review SCRATCHPAD.md.
+Reply APPROVE to continue to the planning phase, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 2 — PLAN (Test Strategy)
+
+**Scratchpad must be APPROVED. No test code in this phase.**
+
+1. Define test strategy based on approved scratchpad:
+   - Coverage areas (service logic, error handling, data access, API, validation, edge cases)
+   - Mocking strategy for dependencies
+   - Test file naming and location per project conventions
+   - Setup/teardown approach
+2. Risk analysis — what's hard to test? What could be flaky?
+3. Write into `PLAN.md`
+
+**Output**: `PLAN.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 2
+
+```
+Say: "Phase 2 (Plan) complete. Please review PLAN.md.
+Reply APPROVE to continue to the task breakdown phase, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 3 — TASKS (Test Cases)
+
+**Plan must be APPROVED. No test code in this phase.**
+
+1. List specific test cases to implement, organized by file:
+   - [ ] Test file 1: `module.service.spec.ts` (or equivalent)
+     - Case 1: Description
+     - Case 2: Description
+   - [ ] Test file 2: `module.controller.spec.ts` (or equivalent)
+     - Case 1: Description
+     - Case 2: Description
+2. For each test case, specify:
+   - What is being tested
+   - Input / setup
+   - Expected outcome
+   - Dependencies to mock
+3. Write into `TASKS.md`
+
+**Output**: `TASKS.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 3
+
+```
+Say: "Phase 3 (Task Breakdown) complete. Please review TASKS.md.
+Reply APPROVE to begin writing tests, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 4 — IMPLEMENTATION (Write Tests)
+
+**Tasks must be APPROVED before writing any test code.**
 
 Follow project conventions:
 - Arrange-Act-Assert pattern
@@ -31,19 +103,15 @@ Follow project conventions:
 - Proper mock setup and cleanup
 - One behavior per test case
 
-### 4. Coverage Areas
-
-- Service/business logic — rules, validations, transformations
-- Error handling — exception throwing, error responses
-- Data access — CRUD operations, queries
-- API/Handler — request handling, response formatting
-- Validation — input validation rules
-- Edge Cases — null handling, empty inputs, boundary conditions
+---
 
 // turbo
-### 5. Validate
+## PHASE 5 — VALIDATION
 
-Run the generated tests and confirm they pass.
+After tests are written:
+- Run the generated tests and confirm they pass
+- Verify coverage of success and failure paths
+- Check for proper mock cleanup between tests
 
 ## Best Practices
 

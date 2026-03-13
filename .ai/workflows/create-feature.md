@@ -7,65 +7,114 @@ agent: feature-builder
 
 Create a new module/component following the project's architecture and conventions.
 
-## Steps
+> [!CAUTION]
+> This workflow requires human approval between every phase.
+> Do NOT skip phases. Do NOT combine phases into a single response.
 
-### 1. Gather Requirements
+---
 
-Ask user for:
-- Module/component name
-- Entity/model fields and types
-- API endpoints or interface (if applicable)
-- Relations with other modules (if any)
+## PHASE 1 — SCRATCHPAD (Exploration)
 
-### 2. Analyze Architecture
+**No code or plans in this phase. Exploration only.**
 
-Use the `analyze-project-structure` skill to understand:
-- Current module layout and patterns
-- Naming conventions in use
-- Existing similar modules to follow as reference
+1. Gather requirements from the user:
+   - Module/component name
+   - Entity/model fields and types
+   - API endpoints or interface (if applicable)
+   - Relations with other modules (if any)
+2. Use the `analyze-project-structure` skill to understand:
+   - Current module layout and patterns
+   - Naming conventions in use
+   - Existing similar modules to follow as reference
+3. Read project context (`context/PROJECT.md`, `context/CONVENTIONS.md`, `context/BOUNDARIES.md`)
+4. Write findings into `SCRATCHPAD.md`
 
-### 3. Generate Module Structure
+**Output**: `SCRATCHPAD.md`
 
-Create the full module following project conventions:
-- Model/entity definition
-- Data access layer (repository/DAO)
-- Business logic layer (service)
-- API layer (controller/handler)
-- Data transfer objects (DTOs/schemas)
-- Tests
+### 🛑 HARD STOP — APPROVAL GATE 1
 
-### 4. Register Module
+```
+Say: "Phase 1 (Scratchpad) complete. Please review SCRATCHPAD.md.
+Reply APPROVE to continue to the planning phase, or provide feedback."
+WAIT for explicit approval.
+```
 
-Register the new module in the project's root configuration (e.g., AppModule, router config, etc.).
+---
 
-### 5. Create Database Migration
+## PHASE 2 — PLAN (Architecture)
 
-If the project uses database migrations, generate the appropriate migration file.
+**Scratchpad must be APPROVED. No code or task lists in this phase.**
+
+1. Define the module structure based on approved scratchpad:
+   - Model/entity definition
+   - Data access layer (repository/DAO)
+   - Business logic layer (service)
+   - API layer (controller/handler)
+   - Data transfer objects (DTOs/schemas)
+   - Tests
+2. Define database migration strategy (if applicable)
+3. Risk analysis and edge cases
+4. Write into `PLAN.md`
+
+**Output**: `PLAN.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 2
+
+```
+Say: "Phase 2 (Plan) complete. Please review PLAN.md.
+Reply APPROVE to continue to the task breakdown phase, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 3 — TASKS (Breakdown)
+
+**Plan must be APPROVED. No code in this phase.**
+
+1. Break the plan into ordered implementation steps:
+   - [ ] Task 1: Create model/entity with proper annotations
+   - [ ] Task 2: Define DTOs with validation
+   - [ ] Task 3: Implement repository/data access layer
+   - [ ] Task 4: Create service with business logic
+   - [ ] Task 5: Build controller/handler with endpoints
+   - [ ] Task 6: Configure module with dependencies
+   - [ ] Task 7: Register module in root configuration
+   - [ ] Task 8: Create database migration
+2. For each task, specify files to create/modify
+3. List dependencies between tasks
+4. Write into `TASKS.md`
+
+**Output**: `TASKS.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 3
+
+```
+Say: "Phase 3 (Task Breakdown) complete. Please review TASKS.md.
+Reply APPROVE to begin implementation, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 4 — IMPLEMENTATION
+
+**Tasks must be APPROVED before writing any code.**
+
+- Implement tasks sequentially in the order defined in `TASKS.md`
+- Follow existing naming conventions exactly
+- Use project path aliases for imports
+- Use validation decorators/schemas in DTOs
+- Use framework-standard exception/error types
+- Use feature/use-case classes for complex operations
+
+---
 
 // turbo
-### 6. Validate
+## PHASE 5 — TESTING & VALIDATION
 
-Run project lint, type check, and tests to ensure the generated code is valid.
-
-## Implementation Checklist
-
-- [ ] Create model/entity with proper annotations
-- [ ] Define DTOs with validation
-- [ ] Implement repository/data access layer
-- [ ] Create service with business logic
-- [ ] Build controller/handler with endpoints
-- [ ] Configure module with dependencies
-- [ ] Register module in root configuration
-- [ ] Create database migration
-- [ ] Write unit tests for service
-- [ ] Write unit tests for controller
-- [ ] Run full test suite
-
-## Best Practices
-
-1. Follow existing naming conventions exactly
-2. Use project path aliases for imports
-3. Use validation decorators/schemas in DTOs
-4. Use framework-standard exception/error types
-5. Test behavior, mock dependencies
-6. Use feature/use-case classes for complex operations
+After implementation:
+- Write unit tests for service
+- Write unit tests for controller
+- Run project lint, type check, and full test suite
+- Verify the module integrates correctly

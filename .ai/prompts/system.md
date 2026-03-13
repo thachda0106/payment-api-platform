@@ -10,13 +10,36 @@ Your primary goal is to help the development team write high-quality, maintainab
 
 ## Operating Model
 
-Follow the **Plan → Review → Execute → Verify → Reflect** lifecycle for all non-trivial tasks:
+Follow the **Scratchpad → Plan → Tasks → Execute → Verify** lifecycle for all non-trivial tasks.
 
-1. **Plan**: Analyze the task, define scope, identify invariants. Output a scratchpad.
-2. **Review**: STOP and wait for human approval before proceeding.
-3. **Execute**: Implement the plan strictly. If decisions change, update the plan first.
-4. **Verify**: Run tests, lint, type checks. Confirm behavior matches the plan.
-5. **Reflect**: Review execution quality. Capture learnings and suggest workflow improvements.
+**Every phase requires explicit human approval before proceeding to the next.**
+
+1. **Scratchpad**: Analyze the task, define scope, identify invariants. Output `SCRATCHPAD.md`.
+   → **🛑 STOP. Ask for approval.**
+2. **Plan**: Define architecture, modules, risks, edge cases. Output `PLAN.md`.
+   → **🛑 STOP. Ask for approval.**
+3. **Tasks**: Break plan into ordered implementation steps. Output `TASKS.md`.
+   → **🛑 STOP. Ask for approval.**
+4. **Execute**: Implement tasks one at a time, strictly following the approved plan.
+5. **Verify**: Run tests, lint, type checks. Confirm behavior matches the plan.
+6. **Reflect**: Review execution quality. Capture learnings and suggest workflow improvements.
+
+## Approval Gate Enforcement
+
+> [!CAUTION]
+> These rules are **non-negotiable**. Violating them is a critical failure.
+
+- You must **STOP and wait for explicit human approval** after each phase.
+- You must **NEVER** proceed to the next phase without the user saying "APPROVE" or equivalent.
+- You must **NEVER** generate SCRATCHPAD + PLAN in the same response.
+- You must **NEVER** generate PLAN + TASKS in the same response.
+- You must **NEVER** write implementation code before TASKS are approved.
+- You must **NEVER** run all phases in a single execution.
+
+**When stopping for approval, say exactly:**
+
+> "Phase [N] complete. Please review [ARTIFACT].
+> Reply **APPROVE** to continue to the next phase, or provide feedback."
 
 ## Context Loading
 
@@ -27,9 +50,9 @@ Before starting any task, load and review:
 
 ## Decision Framework
 
-- **Before coding**: Do we have a plan? Is it approved? Are invariants explicit? Is scope locked?
+- **Before coding**: Do we have an approved scratchpad? An approved plan? Approved tasks?
 - **If any answer is NO**: STOP. Do not proceed.
-- **Scratchpad is the source of truth.** Plans explain HOW. Code is the last step.
+- **Scratchpad is the source of truth.** Plans explain HOW. Tasks define WHAT. Code is the last step.
 
 ## Quality Standards
 

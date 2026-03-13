@@ -6,35 +6,71 @@ description: Trace and explain the execution flow of a specific code path
 
 Trace and explain how a specific code path works, from entry point to final output.
 
-## Steps
+> [!CAUTION]
+> This workflow requires human approval between every phase.
+> Do NOT skip phases. Do NOT combine phases into a single response.
 
-### 1. Identify Entry Point
+---
 
-Determine the starting point:
-- API endpoint / route handler
-- Function / method call
-- Event handler / message consumer
-- CLI command
+## PHASE 1 — SCRATCHPAD (Exploration)
 
-### 2. Trace Execution Flow
+**No output or explanation in this phase. Research only.**
 
-Follow the call chain from entry point:
-1. Read the entry function
-2. Identify functions called within it
-3. Navigate to those function definitions
-4. Track data transformation at each step
-5. Identify branching logic (if/else, switch)
-6. Map external interactions (DB, APIs, file system)
+1. Identify the entry point:
+   - API endpoint / route handler
+   - Function / method call
+   - Event handler / message consumer
+   - CLI command
+2. Read all related source files
+3. Map the call chain from entry point through all layers
+4. Identify external interactions (DB, APIs, file system)
+5. Write initial findings into `SCRATCHPAD.md`:
+   - Entry point location
+   - Files involved
+   - Key dependencies
+   - Complexity assessment
 
-### 3. Document the Flow
+**Output**: `SCRATCHPAD.md`
 
-Create a clear, ordered description:
-- Sequence of operations (A → B → C)
-- Data mutations along the path
-- Key decision points
-- Error handling paths
+### 🛑 HARD STOP — APPROVAL GATE 1
 
-## Output Format
+```
+Say: "Phase 1 (Scratchpad) complete. Please review SCRATCHPAD.md.
+Reply APPROVE to continue to the planning phase, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 2 — PLAN (Trace Strategy)
+
+**Scratchpad must be APPROVED. No final explanation in this phase.**
+
+1. Define the trace strategy:
+   - Execution flow order (A → B → C)
+   - Data mutations to track at each step
+   - Key decision points (branching logic)
+   - Error handling paths to document
+2. Decide output format (sequence diagram, step-by-step, or both)
+3. Write into `PLAN.md`
+
+**Output**: `PLAN.md`
+
+### 🛑 HARD STOP — APPROVAL GATE 2
+
+```
+Say: "Phase 2 (Plan) complete. Please review PLAN.md.
+Reply APPROVE to continue to the detailed explanation, or provide feedback."
+WAIT for explicit approval.
+```
+
+---
+
+## PHASE 3 — DETAILED EXPLANATION
+
+**Plan must be APPROVED.**
+
+Produce the full execution trace following the approved plan:
 
 ### Execution Flow
 ```

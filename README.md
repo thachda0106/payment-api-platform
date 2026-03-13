@@ -72,17 +72,19 @@ bash .ai/scripts/validate-template.sh
 | **Adapter pattern** | Each AI tool gets a thin adapter translating `.ai/` into tool-native format |
 | **Convention over configuration** | Standard filenames and YAML frontmatter |
 | **Composable** | Each module (agent, skill, workflow) is independent and opt-in |
-| **PREV operating model** | Plan → Review → Execute → Verify → Reflect |
+| **5-phase operating model** | Plan → Review → Execute → Verify → Reflect |
 
 ## Operating Model
 
-Every non-trivial task follows:
+Every non-trivial task follows 5 phases:
 
 ```
 PLAN → REVIEW (hard stop) → EXECUTE → VERIFY → REFLECT
 ```
 
 The AI creates a scratchpad, stops for human approval, implements the plan, verifies results, and reflects on what was learned.
+
+In workflows, these phases expand into 6 detailed steps: **Scratchpad → Plan → Tasks → Execute → Verify → Reflect**, with approval gates between each phase.
 
 ## Adapters
 

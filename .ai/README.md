@@ -24,7 +24,17 @@ adapters/                ← Tool-specific translation layers
 
 ## Quick Start
 
-### 1. Install for your AI tool
+### 1. Fill in context files
+
+Edit these files with your project's details:
+
+| File | Purpose |
+|------|---------|
+| `.ai/context/PROJECT.md` | Project name, tech stack, commands, architecture |
+| `.ai/context/CONVENTIONS.md` | Coding standards, naming conventions |
+| `.ai/context/BOUNDARIES.md` | What the AI should never do |
+
+### 2. Install for your AI tool
 
 ```bash
 bash .ai/scripts/install-ai-template.sh
@@ -32,7 +42,7 @@ bash .ai/scripts/install-ai-template.sh
 
 This auto-detects installed AI tools and generates the correct configuration.
 
-### 2. Install a specific adapter manually
+### 3. Install a specific adapter manually
 
 ```bash
 bash adapters/antigravity/install.sh   # For Antigravity
@@ -41,11 +51,21 @@ bash adapters/cursor/install.sh        # For Cursor
 bash adapters/aider/install.sh         # For Aider
 ```
 
-### 3. Validate template integrity
+### 4. Validate template integrity
 
 ```bash
 bash .ai/scripts/validate-template.sh
 ```
+
+## Operating Model
+
+Every non-trivial task follows 5 phases:
+
+```
+PLAN → REVIEW (hard stop) → EXECUTE → VERIFY → REFLECT
+```
+
+In workflows, these expand into 6 detailed steps: **Scratchpad → Plan → Tasks → Execute → Verify → Reflect**, with approval gates between each phase.
 
 ## Design Principles
 
@@ -68,3 +88,8 @@ See [Migration Guide](docs/MIGRATION_GUIDE.md) for details.
 ## Adding a New Adapter
 
 See [Adapter Guide](docs/ADAPTER_GUIDE.md) for the adapter contract specification.
+
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines on adding agents, workflows, skills, and adapters.
+

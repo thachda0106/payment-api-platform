@@ -38,6 +38,10 @@ Plan → Review (HARD STOP) → Execute → Verify → Reflect
 4. **Validates** with tests, lint, type checks (Verify)
 5. **Reflects** on execution quality and captures learnings (Reflect)
 
+> In workflows, these 5 phases expand into 6 detailed steps:
+> **Scratchpad → Plan → Tasks → Execute → Verify → Reflect**,
+> with approval gates between each phase.
+
 ## Module Relationships
 
 ```

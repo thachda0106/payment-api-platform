@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-13
+
+### Added
+- Approval gate enforcement in all 12 workflow files (HARD STOP between every phase)
+- "Skipping Approval Gates" section in `BOUNDARIES.md`
+- "Approval Gate Enforcement" section in `system.md`
+- Standardized workflow phase structure: SCRATCHPAD → PLAN → TASKS → IMPLEMENTATION → VERIFICATION
+
+### Changed
+- All workflows now include explicit `🛑 HARD STOP — APPROVAL GATE` markers
+- Operating model documentation clarified (5-phase high-level ↔ 6-step detailed lifecycle)
+
 ## [1.1.0] - 2026-03-13
 
 ### Added

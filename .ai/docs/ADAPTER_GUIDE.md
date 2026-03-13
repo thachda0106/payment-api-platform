@@ -63,6 +63,8 @@ Not all tools support all features. Use `null` target for unsupported features:
 | Scripts | ✅ | ✅ | ❌ | ❌ |
 | Clean/uninstall | ✅ | ✅ | ✅ | ✅ |
 
+> **Note:** Scripts (install, validate, migrate) remain in `.ai/scripts/` and are run directly from there. They are not duplicated into adapter output directories.
+
 ## See Also
 
 - [ADAPTER_SPEC.md](../../adapters/ADAPTER_SPEC.md) — Formal adapter contract

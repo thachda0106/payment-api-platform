@@ -16,11 +16,17 @@ Define your AI agents, workflows, skills, and conventions **once** in a canonica
 │   ├── CONVENTIONS.md   ← How: coding standards, naming rules
 │   └── BOUNDARIES.md    ← Don't: forbidden actions, safety constraints
 ├── agents/              ← AI persona definitions (6 canonical agents)
-├── workflows/           ← Step-by-step task automation (12 workflows)
+├── workflows/           ← Step-by-step task automation (16 workflows)
+│   ├── build-large-system.md          ← 🏗️ 30-phase system development lifecycle
+│   ├── build-large-system-phases-*.md ← Detailed phase descriptions
+│   ├── create-feature.md              ← Feature development workflow
+│   ├── fix-bug.md                     ← Bug fixing workflow
+│   └── ...                            ← 12 more workflow files
 ├── skills/              ← Atomic, reusable procedures (7 skills)
 ├── prompts/             ← Reusable prompt fragments and templates
 ├── scripts/             ← Automation (install, validate, migrate)
 └── docs/                ← Documentation
+    └── BUILD_LARGE_SYSTEM_GUIDE.md    ← 📖 How to use the 30-phase workflow
 
 adapters/                ← Tool-specific translation layers
 ├── claude/              ← Claude Code → .claude/ + CLAUDE.md
@@ -63,6 +69,29 @@ bash adapters/aider/install.sh
 ```bash
 bash .ai/scripts/validate-template.sh
 ```
+
+## 🏗️ Build Large System Workflow
+
+The flagship workflow: a **30-phase BigTech-level system development lifecycle** across **8 stages**, reflecting how Amazon, Google, Netflix, Uber, and Stripe build distributed systems.
+
+```
+Stage A: Discovery & Requirements  → Phases 01–03
+Stage B: Domain & Architecture     → Phases 04–11
+Stage C: Platform & Infrastructure → Phases 12–16
+Stage D: Service Development       → Phases 17–19
+Stage E: Hardening                 → Phases 20–25
+Stage F: Launch                    → Phases 26–27
+Stage G: Operations                → Phases 28–29
+Stage H: Evolution                 → Phase 30
+```
+
+**Get started**: Read the [Build Large System Usage Guide](.ai/docs/BUILD_LARGE_SYSTEM_GUIDE.md) for step-by-step instructions.
+
+**Workflow files**:
+- [Master overview](.ai/workflows/build-large-system.md) — Phase table, dependency graph, folder structure
+- [Phases 01–10](.ai/workflows/build-large-system-phases-01-10.md) — Discovery → Architecture
+- [Phases 11–20](.ai/workflows/build-large-system-phases-11-20.md) — Platform → Service Dev
+- [Phases 21–30](.ai/workflows/build-large-system-phases-21-30.md) — Hardening → Operations → Evolution
 
 ## Design Principles
 

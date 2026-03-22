@@ -9,17 +9,15 @@ A **tool-agnostic AI development template** that works across Claude Code, Antig
 ├── AI_MANIFEST.yaml     ← Template metadata
 ├── context/             ← Project-level AI instructions
 ├── agents/              ← AI persona definitions
-├── workflows/           ← Step-by-step task automation
+├── workflows/           ← Step-by-step task automation (16 workflows)
+│   ├── build-large-system.md          ← 🏗️ 30-phase lifecycle (master)
+│   ├── build-large-system-phases-*.md ← Detailed phase descriptions
+│   └── ...                            ← 12 more workflow files
 ├── skills/              ← Atomic, reusable procedures
 ├── prompts/             ← Reusable prompt fragments
 ├── scripts/             ← Utility automation scripts
 └── docs/                ← Documentation
-
-adapters/                ← Tool-specific translation layers
-├── claude/              ← Claude Code adapter
-├── antigravity/         ← Antigravity adapter
-├── cursor/              ← Cursor adapter
-└── aider/               ← Aider adapter
+    └── BUILD_LARGE_SYSTEM_GUIDE.md    ← 📖 How to use the lifecycle
 ```
 
 ## Quick Start
@@ -57,6 +55,25 @@ bash adapters/aider/install.sh         # For Aider
 bash .ai/scripts/validate-template.sh
 ```
 
+## 🏗️ Build Large System Workflow
+
+The flagship workflow: **30 phases × 8 stages** for building large-scale distributed systems from scratch.
+
+| Stage | Phases | Focus |
+|-------|--------|-------|
+| A. Discovery & Requirements | 01–03 | Problem, users, risks |
+| B. Domain & Architecture | 04–11 | Domain, security, APIs, events, flows |
+| C. Platform & Infrastructure | 12–16 | IaC, core libs, testing, CI/CD |
+| D. Service Development | 17–19 | Vertical slice → full build → migration |
+| E. Hardening | 20–25 | Observability, perf, compliance, chaos, DR, readiness |
+| F. Launch | 26–27 | Deploy + 2-week stabilization |
+| G. Operations | 28–29 | On-call, incidents, SLO review |
+| H. Evolution | 30 | Tech debt, FinOps, v2 planning |
+
+📖 **[How to use this workflow →](docs/BUILD_LARGE_SYSTEM_GUIDE.md)**
+
+**Workflow files**: [Master](workflows/build-large-system.md) · [Phases 01–10](workflows/build-large-system-phases-01-10.md) · [Phases 11–20](workflows/build-large-system-phases-11-20.md) · [Phases 21–30](workflows/build-large-system-phases-21-30.md)
+
 ## Operating Model
 
 Every non-trivial task follows 5 phases:
@@ -77,17 +94,15 @@ In workflows, these expand into 6 detailed steps: **Scratchpad → Plan → Task
 | **Project-parameterized** | Templates use placeholders filled at install time |
 | **Composable** | Each module (agent, skill, workflow) is independent and opt-in |
 
-## Migrating from Claude Code
+## Documentation
 
-```bash
-bash .ai/scripts/migrate-from-claude.sh
-```
-
-See [Migration Guide](docs/MIGRATION_GUIDE.md) for details.
-
-## Adding a New Adapter
-
-See [Adapter Guide](docs/ADAPTER_GUIDE.md) for the adapter contract specification.
+| Doc | Purpose |
+|-----|---------|
+| [Build Large System Guide](docs/BUILD_LARGE_SYSTEM_GUIDE.md) | How to use the 30-phase lifecycle |
+| [Architecture](docs/ARCHITECTURE.md) | Template architecture details |
+| [Onboarding](docs/ONBOARDING.md) | New contributor onboarding |
+| [Migration Guide](docs/MIGRATION_GUIDE.md) | Migrate from Claude Code |
+| [Adapter Guide](docs/ADAPTER_GUIDE.md) | How to write adapters |
 
 ## Contributing
 

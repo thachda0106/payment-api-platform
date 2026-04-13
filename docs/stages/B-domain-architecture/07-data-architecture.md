@@ -34,7 +34,7 @@ Design the definitive relational data blueprint for a Tier-1 financial system. T
 | :--- | :--- | :--- | :--- |
 | **Financial Core** | `financial_core_db` | PostgreSQL | Stored procedure boundaries blocking all DB writes except via kernel-verified calculations. |
 | **Payment & Refund** | `payment_db` | PostgreSQL | Relational saga orchestration and locked event coordination. |
-| **Idempotency** | `idempotency_db` | PostgreSQL | Collision isolation executed unilaterally at the onset of DB entry logic bounds. |
+| **Idempotency** | `financial_core_db` (Schema: `idempotency`) | PostgreSQL | Collision isolation executed unilaterally at the onset of DB entry logic bounds. |
 | **FX & Treasury** | `fx_db` | PostgreSQL | Ledger snapshots mapping guaranteed deterministic zero-sum conversion mathematics. |
 
 ---
@@ -89,7 +89,25 @@ REVOKE INSERT, UPDATE, DELETE ON journal_entries FROM app_role;
 REVOKE INSERT, UPDATE, DELETE ON journal_lines FROM app_role;
 ```
 
-### 4.2 The Golden Write Boundary (RPC via DB Kernel)
+### 4.2 Idempotency (Schema: `idempotency`)
+
+The Idempotency mechanism guarantees safety against double-charging and concurrent request overlap natively at the DB entrance. Physically, it resides within the same overarching `financial_core_db` to partake in complete ACID Transaction boundaries (enabling it to rollback seamlessly with the ledger if limits are breached), but it is logically isolated using a distinct Database Schema to separate it from pure financial tables.
+
+```sql
+CREATE SCHEMA IF NOT EXISTS idempotency;
+
+CREATE TABLE idempotency.idempotency_keys (
+    idempotency_key VARCHAR(255) PRIMARY KEY,
+    user_id         VARCHAR(255) NOT NULL,
+    endpoint        VARCHAR(255) NOT NULL,
+    request_hash    CHAR(64) NOT NULL,
+    status          VARCHAR(20) NOT NULL CHECK (status IN ('STARTED', 'COMPLETED')),
+    locked_until    TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### 4.3 The Golden Write Boundary (RPC via DB Kernel)
 
 To insert data, the application must submit intent exclusively to this `SECURITY DEFINER` function, which maps logic organically inside the kernel isolating external race limits.
 
@@ -108,7 +126,7 @@ DECLARE
     v_line_id UUID; v_line_order INT := 1;
 BEGIN
     -- 1. Idempotency Binding Isolation
-    INSERT INTO idempotency_keys (idempotency_key, user_id, endpoint, request_hash, status, locked_until)
+    INSERT INTO idempotency.idempotency_keys (idempotency_key, user_id, endpoint, request_hash, status, locked_until)
     VALUES (p_idempotency_key, p_user_id, p_endpoint, p_request_hash, 'STARTED', NOW() + INTERVAL '1 minute');
 
     -- 2. Master Entry Instantiation
@@ -159,12 +177,12 @@ BEGIN
     END LOOP;
 
     -- Wrap Idempotency Release Status Object
-    UPDATE idempotency_keys SET status = 'COMPLETED' WHERE idempotency_key = p_idempotency_key;
+    UPDATE idempotency.idempotency_keys SET status = 'COMPLETED' WHERE idempotency_key = p_idempotency_key;
 END;
 $$;
 ```
 
-### 4.3 Multi-Currency Statement Double-Entry Integrity (MANDATORY)
+### 4.4 Multi-Currency Statement Double-Entry Integrity (MANDATORY)
 
 Validations grouping `FOR EACH ROW` contain edge-case calculation lags during concurrent evaluation limits. We map limits explicitly utilizing atomic Postgres transition tables `REFERENCING NEW TABLE`.
 

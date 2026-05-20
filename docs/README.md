@@ -3,6 +3,25 @@
 > **BigTech System Development Lifecycle** — 30 Phases × 8 Stages
 > Building a MoMo-like Payment API Platform
 
+## 📚 Knowledge Prerequisites
+
+Before starting Phase 01 or any development, work through the **[Knowledge Prerequisites Learning Series](learning/README.md)**.
+
+This 8-module series covers every domain you must understand before building a payment platform:
+
+| Module | Topic | Why You Need It |
+|--------|-------|-----------------|
+| 01 | [Payment Domain Fundamentals](learning/01-payment-domain-fundamentals.md) | How the payment lifecycle works: auth → capture → settlement |
+| 02 | [Financial Accounting for Engineers](learning/02-financial-accounting-for-engineers.md) | Double-entry ledgers, journal entries, trial balance |
+| 03 | [Payment Security & Compliance](learning/03-payment-security-and-compliance.md) | PCI DSS, KYC/AML, field-level encryption |
+| 04 | [Idempotency & Distributed Consistency](learning/04-idempotency-and-consistency.md) | Idempotency keys, Outbox pattern, Saga patterns |
+| 05 | [Fraud Detection Fundamentals](learning/05-fraud-detection-basics.md) | Rule engines, velocity checks, ML scoring |
+| 06 | [Settlement & Reconciliation](learning/06-settlement-and-reconciliation.md) | NOSTRO/VOSTRO, EOD batch, reconciliation |
+| 07 | [Go Language & Ecosystem](learning/07-go-language-and-ecosystem.md) | Go concurrency, sqlc, Chi, Watermill for payment services |
+| 08 | [Observability Stack](learning/08-observability-stack.md) | OTel, Prometheus, Jaeger, structured logging, SLOs |
+
+**Estimated study time**: 22–30 hours. Start with [Module 01](learning/01-payment-domain-fundamentals.md).
+
 ## Current Status
 
 | Stage | Phases | Status |

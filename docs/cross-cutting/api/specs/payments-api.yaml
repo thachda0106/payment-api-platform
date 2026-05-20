@@ -1,0 +1,967 @@
+openapi: "3.1.0"
+info:
+  title: "Payment API Platform — Payments"
+  version: "1.0.0"
+  description: |
+    Payment resource API for the MoMo-like Payment API Platform.
+    All mutating endpoints require `Idempotency-Key` header.
+    Auth: Bearer JWT (OAuth 2.0) or API Key (`sk_live_` / `sk_test_` prefix).
+
+    **Versioning**: URI `/v1/` + `API-Version: YYYY-MM-DD` header.
+  contact:
+    name: "Platform API Team"
+    url: "https://docs.payments.platform.com"
+  license:
+    name: "Proprietary — Internal Use Only"
+
+servers:
+  - url: "https://api.payments.platform.com/v1"
+    description: "Production"
+  - url: "https://api-sandbox.payments.platform.com/v1"
+    description: "Sandbox / Testing"
+
+tags:
+  - name: "Payments"
+    description: "Payment creation, retrieval, cancellation, and listing"
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  /payments:
+    post:
+      tags: ["Payments"]
+      summary: "Create a Payment"
+      description: |
+        Initiates a dual-entry transfer via the `create_journal_entry` stored procedure.
+        Requires Idempotency-Key header.
+      operationId: "createPayment"
+      security:
+        - BearerAuth: ["write:payments"]
+        - ApiKeyAuth: ["write:payments"]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/APIVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+            examples:
+              basicPayment:
+                summary: "Standard wallet-to-merchant payment"
+                value:
+                  source_account_id: "acc_001_wallet"
+                  destination_account_id: "acc_002_merchant"
+                  amount: 15000
+                  currency: "VND"
+                  description: "Coffee Purchase"
+                  metadata:
+                    order_id: "ORD-2026-0001"
+              highValuePayment:
+                summary: "High-value merchant payment"
+                value:
+                  source_account_id: "acc_001_wallet"
+                  destination_account_id: "acc_003_enterprise"
+                  amount: 5000000
+                  currency: "VND"
+                  description: "Laptop Purchase — Invoice INV-042"
+                  metadata:
+                    invoice_id: "INV-042"
+      responses:
+        "201":
+          description: "Payment created successfully"
+          headers:
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+              examples:
+                success:
+                  value:
+                    id: "pay_xyz987654"
+                    object: "payment"
+                    amount: 15000
+                    currency: "VND"
+                    status: "succeeded"
+                    source_account_id: "acc_001_wallet"
+                    destination_account_id: "acc_002_merchant"
+                    description: "Coffee Purchase"
+                    created: 1713024000
+                    livemode: true
+                    metadata:
+                      order_id: "ORD-2026-0001"
+        "200":
+          description: "Idempotency replay — original response returned"
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+                example: true
+              description: "Indicates this response is a replay of a previously processed request"
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "402":
+          description: "Payment method declined or insufficient funds"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                insufficientFunds:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "insufficient_funds"
+                      message: "The source account lacks sufficient funds for this transaction."
+                      param: "amount"
+                      doc_url: "https://docs.payments.platform.com/errors#insufficient_funds"
+                    request_id: "req_7f3aB9cD1eF2"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Idempotency conflict"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                keyMismatch:
+                  value:
+                    error:
+                      type: "idempotency_error"
+                      code: "idempotency_key_mismatch"
+                      message: "Idempotency key reused with a different request body."
+                      doc_url: "https://docs.payments.platform.com/errors#idempotency_key_mismatch"
+                    request_id: "req_IdemConflict1"
+                keyInProgress:
+                  value:
+                    error:
+                      type: "idempotency_error"
+                      code: "idempotency_key_in_progress"
+                      message: "A request with this Idempotency-Key is currently processing."
+                      doc_url: "https://docs.payments.platform.com/errors#idempotency_key_in_progress"
+                    request_id: "req_IdemInProg1"
+        "422":
+          description: "Business rule violation"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                insufficientFunds:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "insufficient_funds"
+                      message: "The source account lacks sufficient funds for this transaction."
+                      param: "amount"
+                      doc_url: "https://docs.payments.platform.com/errors#insufficient_funds"
+                    request_id: "req_7f3aB9cD1eF2"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    get:
+      tags: ["Payments"]
+      summary: "List Payments"
+      description: "Retrieve a cursor-paginated list of payments. Filterable by status, currency, and creation date range."
+      operationId: "listPayments"
+      security:
+        - BearerAuth: ["read:payments"]
+        - ApiKeyAuth: ["read:payments"]
+      parameters:
+        - name: "limit"
+          in: "query"
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: "Maximum number of payments to return (1–100)"
+        - name: "cursor"
+          in: "query"
+          schema:
+            type: string
+          description: "Pagination cursor from previous response. Omit for first page."
+        - name: "status"
+          in: "query"
+          schema:
+            type: string
+            enum: ["processing", "succeeded", "failed", "canceled"]
+          description: "Filter by payment status"
+        - name: "currency"
+          in: "query"
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
+          description: "Filter by 3-letter ISO currency code"
+        - name: "created[gte]"
+          in: "query"
+          schema:
+            type: integer
+            format: "unix-timestamp"
+          description: "Filter payments created on or after this Unix timestamp"
+        - name: "created[lte]"
+          in: "query"
+          schema:
+            type: integer
+            format: "unix-timestamp"
+          description: "Filter payments created on or before this Unix timestamp"
+        - $ref: "#/components/parameters/APIVersion"
+      responses:
+        "200":
+          description: "Paginated list of payments"
+          headers:
+            Link:
+              schema:
+                type: string
+              description: "RFC 5988 pagination links"
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentList"
+              examples:
+                withMore:
+                  value:
+                    object: "list"
+                    data:
+                      - id: "pay_xyz987654"
+                        object: "payment"
+                        amount: 15000
+                        currency: "VND"
+                        status: "succeeded"
+                        source_account_id: "acc_001_wallet"
+                        destination_account_id: "acc_002_merchant"
+                        description: "Coffee Purchase"
+                        created: 1713024000
+                        livemode: true
+                        metadata: {}
+                      - id: "pay_abc123456"
+                        object: "payment"
+                        amount: 50000
+                        currency: "VND"
+                        status: "succeeded"
+                        source_account_id: "acc_001_wallet"
+                        destination_account_id: "acc_003_enterprise"
+                        description: "Grab Ride"
+                        created: 1713025000
+                        livemode: true
+                        metadata: {}
+                    has_more: true
+                    next_cursor: "cUR_Xp9k2MzQa"
+                    url: "/v1/payments?limit=2&cursor=cUR_Xp9k2MzQa"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /payments/{payment_id}:
+    get:
+      tags: ["Payments"]
+      summary: "Retrieve a Payment"
+      description: "Get a single payment by its unique identifier."
+      operationId: "getPayment"
+      security:
+        - BearerAuth: ["read:payments"]
+        - ApiKeyAuth: ["read:payments"]
+      parameters:
+        - name: "payment_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+            pattern: "^pay_[a-zA-Z0-9]+$"
+          description: "Payment identifier (e.g., pay_xyz987654)"
+        - $ref: "#/components/parameters/APIVersion"
+      responses:
+        "200":
+          description: "Payment details"
+          headers:
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: "Payment not found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                notFound:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "payment_not_found"
+                      message: "Payment 'pay_notexist' not found."
+                      doc_url: "https://docs.payments.platform.com/errors#payment_not_found"
+                    request_id: "req_NotFound1"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      tags: ["Payments"]
+      summary: "Update Payment Metadata"
+      description: "Update metadata and description for an existing payment. Only metadata fields are mutable — amount, currency, and accounts are immutable after creation."
+      operationId: "updatePayment"
+      security:
+        - BearerAuth: ["write:payments"]
+        - ApiKeyAuth: ["write:payments"]
+      parameters:
+        - name: "payment_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+            pattern: "^pay_[a-zA-Z0-9]+$"
+          description: "Payment identifier"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/APIVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePaymentRequest"
+      responses:
+        "200":
+          description: "Payment metadata updated"
+          headers:
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /payments/{payment_id}/cancel:
+    post:
+      tags: ["Payments"]
+      summary: "Cancel a Payment"
+      description: |
+        Cancel a payment that is still in `processing` status.
+        Creates a reversal journal entry to return funds to the source account.
+        Canceled payments cannot be re-processed.
+      operationId: "cancelPayment"
+      security:
+        - BearerAuth: ["write:payments"]
+        - ApiKeyAuth: ["write:payments"]
+      parameters:
+        - name: "payment_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+            pattern: "^pay_[a-zA-Z0-9]+$"
+          description: "Payment identifier"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/APIVersion"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: "Reason for cancellation"
+      responses:
+        "200":
+          description: "Payment canceled"
+          headers:
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+              examples:
+                canceled:
+                  value:
+                    id: "pay_xyz987654"
+                    object: "payment"
+                    amount: 15000
+                    currency: "VND"
+                    status: "canceled"
+                    source_account_id: "acc_001_wallet"
+                    destination_account_id: "acc_002_merchant"
+                    description: "Coffee Purchase"
+                    created: 1713024000
+                    livemode: true
+                    metadata: {}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Payment cannot be canceled"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                alreadySucceeded:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "payment_not_cancelable"
+                      message: "Payment 'pay_xyz987654' cannot be canceled because its status is 'succeeded'."
+                      doc_url: "https://docs.payments.platform.com/errors#payment_not_cancelable"
+                    request_id: "req_CancelDenied1"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /payments/{payment_id}/refunds:
+    post:
+      tags: ["Refunds"]
+      summary: "Create a Refund"
+      description: |
+        Refund a payment partially or fully. Only `succeeded` payments can be refunded.
+        Multiple partial refunds are allowed until the full amount is exhausted.
+      operationId: "createRefund"
+      security:
+        - BearerAuth: ["write:refunds"]
+        - ApiKeyAuth: ["write:refunds"]
+      parameters:
+        - name: "payment_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+            pattern: "^pay_[a-zA-Z0-9]+$"
+          description: "Payment identifier"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/APIVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequest"
+      responses:
+        "201":
+          description: "Refund created"
+          headers:
+            API-Version:
+              $ref: "#/components/headers/APIVersion"
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Payment already fully refunded"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                alreadyRefunded:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "payment_already_refunded"
+                      message: "This payment has already been fully refunded."
+                      doc_url: "https://docs.payments.platform.com/errors#payment_already_refunded"
+                    request_id: "req_RefundDenied1"
+        "422":
+          description: "Refund amount exceeds remaining refundable amount"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                exceedsRemaining:
+                  value:
+                    error:
+                      type: "invalid_request_error"
+                      code: "refund_amount_exceeds_remaining"
+                      message: "Refund amount (10000) exceeds remaining refundable amount (5000)."
+                      param: "amount"
+                    request_id: "req_RefundOverflow1"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+# --- COMPONENTS ---
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: "http"
+      scheme: "bearer"
+      bearerFormat: "JWT"
+      description: "OAuth 2.0 JWT (RS256). Scopes: read:payments, write:payments, write:refunds."
+    ApiKeyAuth:
+      type: "http"
+      scheme: "bearer"
+      bearerFormat: "API Key"
+      description: "Secret API key. Prefixed sk_live_ or sk_test_. Same scope model as BearerAuth."
+
+  parameters:
+    IdempotencyKey:
+      name: "Idempotency-Key"
+      in: "header"
+      required: true
+      schema:
+        type: string
+        maxLength: 255
+        pattern: "^[a-zA-Z0-9_-]+$"
+        example: "cb174dc0-2ed2-4b2a-bf35-a131015fc65e"
+      description: "Unique identifier for idempotent request processing. UUID v4 recommended."
+    APIVersion:
+      name: "API-Version"
+      in: "header"
+      required: false
+      schema:
+        type: string
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+        example: "2026-05-20"
+      description: "Semantic API version date. Defaults to latest if omitted."
+
+  headers:
+    API-Version:
+      schema:
+        type: string
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+      description: "API version that handled the request"
+    XRequestId:
+      schema:
+        type: string
+        pattern: "^req_[a-zA-Z0-9]+$"
+      description: "Unique request identifier for support tracing"
+
+  schemas:
+    CreatePaymentRequest:
+      type: object
+      required:
+        - source_account_id
+        - destination_account_id
+        - amount
+        - currency
+      properties:
+        source_account_id:
+          type: string
+          pattern: "^acc_[a-zA-Z0-9_]+$"
+          description: "Source account ID (payer)"
+          example: "acc_001_wallet"
+        destination_account_id:
+          type: string
+          pattern: "^acc_[a-zA-Z0-9_]+$"
+          description: "Destination account ID (payee)"
+          example: "acc_002_merchant"
+        amount:
+          type: integer
+          minimum: 1
+          description: "Amount in minor currency unit (e.g., VND = no decimal; cents for USD)"
+          example: 15000
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: "ISO 4217 3-letter currency code"
+          example: "VND"
+        description:
+          type: string
+          maxLength: 500
+          description: "Human-readable description of the payment"
+          example: "Coffee Purchase"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Arbitrary key-value pairs. Max 20 keys, 500 chars per value."
+          example:
+            order_id: "ORD-2026-0001"
+            branch: "HCM-SG-001"
+
+    UpdatePaymentRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          maxLength: 500
+          description: "Updated description"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: "Merge-update metadata. Keys not specified are retained."
+      minProperties: 1
+      additionalProperties: false
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^pay_[a-zA-Z0-9]+$"
+          description: "Unique payment identifier"
+          example: "pay_xyz987654"
+        object:
+          type: string
+          enum: ["payment"]
+          description: "Resource type discriminator"
+        amount:
+          type: integer
+          description: "Payment amount in minor currency unit"
+          example: 15000
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          description: "ISO 4217 currency code"
+          example: "VND"
+        status:
+          type: string
+          enum: ["processing", "succeeded", "failed", "canceled"]
+          description: "Payment lifecycle status"
+        source_account_id:
+          type: string
+          description: "Source account ID (payer)"
+        destination_account_id:
+          type: string
+          description: "Destination account ID (payee)"
+        description:
+          type: string
+          nullable: true
+          description: "Human-readable description"
+        created:
+          type: integer
+          format: "unix-timestamp"
+          description: "Creation timestamp (Unix epoch seconds)"
+          example: 1713024000
+        livemode:
+          type: boolean
+          description: "True for live payments, false for sandbox"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: "User-defined metadata"
+      required:
+        - id
+        - object
+        - amount
+        - currency
+        - status
+        - source_account_id
+        - destination_account_id
+        - created
+        - livemode
+
+    PaymentList:
+      type: object
+      properties:
+        object:
+          type: string
+          enum: ["list"]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        has_more:
+          type: boolean
+          description: "True if more pages exist"
+        next_cursor:
+          type: string
+          nullable: true
+          description: "Cursor for the next page, null if has_more is false"
+        url:
+          type: string
+          description: "Canonical URL for the next page"
+      required:
+        - object
+        - data
+        - has_more
+        - next_cursor
+        - url
+
+    CreateRefundRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          description: "Refund amount in minor currency unit. If omitted, full remaining amount is refunded."
+          example: 15000
+        reason:
+          type: string
+          enum:
+            - "duplicate"
+            - "fraudulent"
+            - "requested_by_customer"
+          description: "Reason for refund"
+        description:
+          type: string
+          maxLength: 500
+          description: "Additional refund notes"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+      minProperties: 1
+      additionalProperties: false
+
+    Refund:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^ref_[a-zA-Z0-9]+$"
+          description: "Unique refund identifier"
+          example: "ref_def456789"
+        object:
+          type: string
+          enum: ["refund"]
+        payment_id:
+          type: string
+          description: "Original payment identifier"
+        amount:
+          type: integer
+          description: "Refunded amount"
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        status:
+          type: string
+          enum: ["processing", "succeeded", "failed"]
+          description: "Refund lifecycle status"
+        reason:
+          type: string
+          nullable: true
+          enum: ["duplicate", "fraudulent", "requested_by_customer"]
+        description:
+          type: string
+          nullable: true
+        created:
+          type: integer
+          format: "unix-timestamp"
+          description: "Creation timestamp (Unix epoch seconds)"
+        livemode:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+        - id
+        - object
+        - payment_id
+        - amount
+        - currency
+        - status
+        - created
+        - livemode
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type:
+              type: string
+              enum:
+                - "api_error"
+                - "authentication_error"
+                - "authorization_error"
+                - "invalid_request_error"
+                - "rate_limit_error"
+                - "idempotency_error"
+              description: "High-level error category"
+            code:
+              type: string
+              description: "Machine-readable error code"
+            message:
+              type: string
+              description: "Human-readable error description"
+            param:
+              type: string
+              description: "Request parameter that triggered the error (if applicable)"
+            doc_url:
+              type: string
+              format: "uri"
+              description: "Link to documentation for this error code"
+        request_id:
+          type: string
+          pattern: "^req_[a-zA-Z0-9]+$"
+          description: "Unique request identifier for support tracing"
+      required:
+        - error
+        - request_id
+
+  responses:
+    BadRequest:
+      description: "Bad Request — missing or invalid parameters"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingIdempotencyKey:
+              value:
+                error:
+                  type: "invalid_request_error"
+                  code: "idempotency_key_missing"
+                  message: "The request requires an Idempotency-Key header."
+                  doc_url: "https://docs.payments.platform.com/errors#idempotency_key_missing"
+                request_id: "req_BadReq001"
+            invalidAmount:
+              value:
+                error:
+                  type: "invalid_request_error"
+                  code: "invalid_amount"
+                  message: "Amount must be a positive integer representing the minor currency unit."
+                  param: "amount"
+                request_id: "req_BadReq002"
+
+    Unauthorized:
+      description: "Unauthorized — invalid or missing credentials"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalidKey:
+              value:
+                error:
+                  type: "authentication_error"
+                  code: "invalid_api_key"
+                  message: "Invalid API key provided."
+                request_id: "req_AuthFail1"
+
+    Forbidden:
+      description: "Forbidden — insufficient scope"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            scopeInsufficient:
+              value:
+                error:
+                  type: "authorization_error"
+                  code: "scope_insufficient"
+                  message: "The provided credentials do not have the required scope: write:payments"
+                request_id: "req_ScopeFail1"
+
+    NotFound:
+      description: "Not Found"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: "Conflict — idempotency or state conflict"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    RateLimited:
+      description: "Rate limit exceeded"
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: "Rate limit ceiling"
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: "Remaining requests in window"
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: "Unix timestamp when window resets"
+        Retry-After:
+          schema:
+            type: integer
+          description: "Seconds until next request allowed"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            rateLimited:
+              value:
+                error:
+                  type: "rate_limit_error"
+                  code: "rate_limit_exceeded"
+                  message: "Too many requests. Rate limit of 20 req/s exceeded."
+                  doc_url: "https://docs.payments.platform.com/errors#rate_limit_exceeded"
+                request_id: "req_RateLimit1"
+
+    InternalError:
+      description: "Internal Server Error"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            internal:
+              value:
+                error:
+                  type: "api_error"
+                  code: "internal_error"
+                  message: "An unexpected error occurred. The team has been notified."
+                request_id: "req_Internal1"

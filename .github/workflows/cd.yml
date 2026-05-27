@@ -1,0 +1,171 @@
+# ============================================================================
+# cd.yml — Multi-Language CD Pipeline
+# ============================================================================
+# Triggered on push to main.
+# Builds and pushes all Docker images to GitHub Container Registry.
+# ============================================================================
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # BUILD & PUSH
+  # ═════════════════════════════════════════════════════════════════════════
+  build-and-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ─── Java services ───
+          - service: financial-core
+            language: java
+            context: services/java/financial-core
+            dockerfile: docker/Dockerfile.java
+          - service: payment-service
+            language: java
+            context: services/java/payment-service
+            dockerfile: docker/Dockerfile.java
+          - service: refund-service
+            language: java
+            context: services/java/refund-service
+            dockerfile: docker/Dockerfile.java
+          - service: fx-service
+            language: java
+            context: services/java/fx-service
+            dockerfile: docker/Dockerfile.java
+          - service: treasury-service
+            language: java
+            context: services/java/treasury-service
+            dockerfile: docker/Dockerfile.java
+          # ─── Python services ───
+          - service: fraud-service
+            language: python
+            context: services/python/fraud-service
+            dockerfile: docker/Dockerfile.python
+          # ─── Node.js services ───
+          - service: notification-service
+            language: nodejs
+            context: services/nodejs/notification-service
+            dockerfile: docker/Dockerfile.nodejs
+          - service: transaction-service
+            language: nodejs
+            context: services/nodejs/transaction-service
+            dockerfile: docker/Dockerfile.nodejs
+          - service: fee-engine
+            language: nodejs
+            context: services/nodejs/fee-engine
+            dockerfile: docker/Dockerfile.nodejs
+          # ─── Go services ───
+          - service: settlement-service
+            language: go
+            context: services/go/settlement-service
+            dockerfile: docker/Dockerfile.go
+          - service: reconciliation-service
+            language: go
+            context: services/go/reconciliation-service
+            dockerfile: docker/Dockerfile.go
+          - service: compliance-service
+            language: go
+            context: services/go/compliance-service
+            dockerfile: docker/Dockerfile.go
+          - service: dispute-service
+            language: go
+            context: services/go/dispute-service
+            dockerfile: docker/Dockerfile.go
+          - service: merchant-service
+            language: go
+            context: services/go/merchant-service
+            dockerfile: docker/Dockerfile.go
+          - service: identity-service
+            language: go
+            context: services/go/identity-service
+            dockerfile: docker/Dockerfile.go
+          - service: bank-integration
+            language: go
+            context: services/go/bank-integration
+            dockerfile: docker/Dockerfile.go
+          - service: audit-service
+            language: go
+            context: services/go/audit-service
+            dockerfile: docker/Dockerfile.go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            LANGUAGE=${{ matrix.language }}
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # IMAGE SCAN (Trivy)
+  # ═════════════════════════════════════════════════════════════════════════
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - financial-core
+          - payment-service
+          - fraud-service
+          - notification-service
+          - settlement-service
+    steps:
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif

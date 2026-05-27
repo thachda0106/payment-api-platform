@@ -1,0 +1,364 @@
+# ============================================================================
+# docker-compose.yml — Payment API Platform Local Development Environment
+# ============================================================================
+# Usage:
+#   docker-compose up -d              Start all infra + services
+#   docker-compose up -d postgres redis kafka   Start infra only
+#   docker-compose --profile services up -d      Start infra + all services
+# ============================================================================
+
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SERVICES
+# ═══════════════════════════════════════════════════════════════════════════
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # INFRASTRUCTURE
+  # ──────────────────────────────────────────────────────────────────────────
+
+  # PostgreSQL 16 — Primary relational database
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: payment
+      POSTGRES_PASSWORD: payment
+      POSTGRES_MULTIPLE_DATABASES: >
+        financial_core_db,
+        payment_db,
+        fraud_db,
+        notification_db,
+        transaction_db,
+        settlement_db,
+        reconciliation_db,
+        compliance_db,
+        dispute_db,
+        merchant_db,
+        identity_db,
+        fee_engine_db,
+        audit_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - payment-network
+
+  # Redis 7 — Cache, rate limiting, session store
+  redis:
+    image: redis:7-alpine
+    container_name: payment-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - payment-network
+
+  # Zookeeper — Kafka dependency
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: payment-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zkdata:/var/lib/zookeeper/data
+      - zklogs:/var/lib/zookeeper/log
+    networks:
+      - payment-network
+
+  # Apache Kafka 3.7 — Event streaming
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: payment-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_started
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - payment-network
+
+  # Confluent Schema Registry — Avro schema management
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    container_name: payment-schema-registry
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+      - "8081:8081"
+    networks:
+      - payment-network
+
+  # OpenSearch 2.11 — Search & analytics
+  opensearch:
+    image: opensearchproject/opensearch:2.11.1
+    container_name: payment-opensearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      DISABLE_SECURITY_PLUGIN: "true"
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - osdata:/usr/share/opensearch/data
+    networks:
+      - payment-network
+
+  # OpenSearch Dashboards
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.1
+    container_name: payment-opensearch-dashboards
+    restart: unless-stopped
+    depends_on:
+      - opensearch
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "5601:5601"
+    networks:
+      - payment-network
+
+  # Jaeger — Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: payment-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "14250:14250"   # gRPC (legacy)
+    networks:
+      - payment-network
+
+  # Prometheus — Metrics collection
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: payment-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./shared/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    networks:
+      - payment-network
+
+  # Grafana — Metrics dashboards
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: payment-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafdata:/var/lib/grafana
+    networks:
+      - payment-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # APPLICATION SERVICES (enabled via --profile services)
+  # Each service uses its language-specific Dockerfile from docker/
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ─── Java: Financial Core (Ledger + Wallet) ───
+  financial-core:
+    profiles: ["services"]
+    build:
+      context: ./services/java/financial-core
+      dockerfile: ../../../../docker/Dockerfile.java
+    container_name: payment-financial-core
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/financial_core_db
+      SPRING_DATASOURCE_USERNAME: payment
+      SPRING_DATASOURCE_PASSWORD: payment
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_SERVICE_NAME: financial-core
+    ports:
+      - "8080:8080"
+    networks:
+      - payment-network
+
+  # ─── Python: Fraud Service ───
+  fraud-service:
+    profiles: ["services"]
+    build:
+      context: ./services/python/fraud-service
+      dockerfile: ../../../../docker/Dockerfile.python
+    container_name: payment-fraud-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://payment:payment@postgres:5432/fraud_db
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_SERVICE_NAME: fraud-service
+    ports:
+      - "8000:8000"
+    networks:
+      - payment-network
+
+  # ─── Node.js: Notification Service ───
+  notification-service:
+    profiles: ["services"]
+    build:
+      context: ./services/nodejs/notification-service
+      dockerfile: ../../../../docker/Dockerfile.nodejs
+    container_name: payment-notification-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://payment:payment@postgres:5432/notification_db
+      KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_SERVICE_NAME: notification-service
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    networks:
+      - payment-network
+
+  # ─── Go: Settlement Service ───
+  settlement-service:
+    profiles: ["services"]
+    build:
+      context: ./services/go/settlement-service
+      dockerfile: ../../../../docker/Dockerfile.go
+    container_name: payment-settlement-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://payment:payment@postgres:5432/settlement_db?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
+      OTEL_SERVICE_NAME: settlement-service
+      SERVER_PORT: "8088"
+    ports:
+      - "8088:8088"
+    networks:
+      - payment-network
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NETWORKS
+# ═══════════════════════════════════════════════════════════════════════════
+networks:
+  payment-network:
+    name: payment-network
+    driver: bridge
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VOLUMES
+# ═══════════════════════════════════════════════════════════════════════════
+volumes:
+  pgdata:
+    name: payment-pgdata
+  redisdata:
+    name: payment-redisdata
+  zkdata:
+    name: payment-zkdata
+  zklogs:
+    name: payment-zklogs
+  kafkadata:
+    name: payment-kafkadata
+  osdata:
+    name: payment-osdata
+  promdata:
+    name: payment-promdata
+  grafdata:
+    name: payment-grafdata

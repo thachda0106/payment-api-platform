@@ -74,7 +74,7 @@ Every technology is scored on these dimensions:
 
 | # | Decision | Selected | Primary Rationale |
 |---|----------|----------|-------------------|
-| D01 | **Go for financial services** | Go 1.22+ | Low-latency GC, strong concurrency, single-binary deployment. Fits the "DB procedure as gateway" architecture. |
+| D01 | **Polyglot microservices** | Java 21 (Core), Python 3.12 (Fraud), Node.js 22 (BFF), Go 1.22+ (Batch) | Best language per workload: Spring Boot for ACID, FastAPI for ML, Fastify for async I/O, Go for batch. Documented in ADR-001. |
 | D02 | **PostgreSQL as sole relational DB** | PostgreSQL 16 (Aurora) | `SECURITY DEFINER` procedures, `SELECT FOR UPDATE`, STATEMENT triggers, hash chaining — none available in MySQL. |
 | D03 | **Apache Kafka for event streaming** | Kafka 3.7 (MSK) | Exactly-once semantics, log compaction, partitioning control, MirrorMaker 2 for DR. |
 | D04 | **Redis for caching + rate limiting** | Redis 7 (ElastiCache) | Sub-millisecond latency, atomic Lua scripting for rate limit token buckets, cluster mode for sharding. |
@@ -104,33 +104,102 @@ Every technology is scored on these dimensions:
 
 ### 4.1 Language & Runtime
 
-**Decision**: **Go 1.22+** for all microservices.
+**Decision**: **Polyglot microservices** — 4 languages mapped to domain tiers based on workload characteristics and ecosystem fit. See [ADR-001 — Polyglot Architecture](../../adr/ADR-001-polyglot-architecture.md) for full rationale.
 
-| Criteria | **Go 1.22+** ✅ | Java 21 (Spring Boot) | Kotlin (Ktor) | Rust |
-|----------|:--:|:--:|:--:|:--:|
-| **Functional Fit** | ★★★★★ | ★★★★★ | ★★★★★ | ★★★★☆ |
-| **Operational Maturity** | ★★★★☆ | ★★★★★ | ★★★☆☆ | ★★★☆☆ |
-| **Team Expertise** | ★★★★☆ | ★★★★★ | ★★★☆☆ | ★★☆☆☆ |
-| **Cost (runtime)** | ★★★★★ | ★★★☆☆ | ★★★☆☆ | ★★★★★ |
-| **Ecosystem** | ★★★★☆ | ★★★★★ | ★★★☆☆ | ★★★☆☆ |
-| **Score (weighted)** | **93** | **88** | **68** | **56** |
+#### Language-to-Context Mapping
 
-**Rationale**:
-- **Low-latency GC**: Go's concurrent GC has sub-millisecond pause times, critical for P99 < 250ms payment flow.
-- **Single binary**: No JVM warmup, no runtime dependency — simplifies Docker images and cold starts.
-- **Goroutines**: Millions of lightweight goroutines for concurrent DB calls, Kafka consumers, HTTP handlers — without thread pool tuning.
-- **Struct tags for validation**: `validate:"required"` + `json:"source_account_id"` — clean mapping to OpenAPI schemas.
+| Language | Version | Tier | Contexts | Score |
+|----------|---------|------|----------|:-----:|
+| **Java** | 21 LTS | Core | Financial Core, Payment, Refund, FX, Treasury | **92** |
+| **Python** | 3.12 | Core | Risk & Fraud | **90** |
+| **Node.js** | 22 LTS | Generic | Notification, Transaction (read), Fee Engine | **85** |
+| **Go** | 1.22+ | Supporting/Generic | Settlement, Reconciliation, Compliance, Dispute, Merchant, Identity, Bank Integration, Audit | **93** |
 
-**Rejected Alternatives**:
-- **Java 21**: Spring Boot ecosystem is mature, but JVM warmup time (5–30s), memory overhead (256MB+ baseline per pod), and GC tuning complexity violated the latency budget. Virtual threads (Project Loom) are promising but young.
-- **Kotlin**: Excellent language; but adds a JVM dependency. Same runtime concerns as Java.
-- **Rust**: Ideal for raw performance, but learning curve is steep, hiring is difficult, and async ecosystem (tokio) adds complexity for CRUD-heavy services.
+#### Selection Rationale Per Language
+
+**Java 21 (Spring Boot 3.3) — Core financial services**:
+- Spring ecosystem provides mature ACID transaction support (JPA, `@Transactional`, pessimistic locking)
+- Spring Security for fine-grained RBAC enforcement at the method level
+- Bean Validation for request validation matching OpenAPI schemas
+- Virtual threads (Project Loom) in Java 21 reduce thread pool complexity
+- 5–30s JVM warmup acceptable for long-running financial services (not cold-start-sensitive)
+- Memory overhead (256MB+) acceptable given critical correctness requirements
+
+**Python 3.12 (FastAPI) — Risk & Fraud**:
+- ML/AI ecosystem: scikit-learn, XGBoost, PyTorch for fraud scoring models
+- pandas + numpy for velocity analysis and pattern detection
+- FastAPI async performance (~14K RPS) sufficient for fraud check path (< 50ms budget)
+- Rapid model iteration without recompilation — critical for fraud rule updates
+- Pydantic v2 for request validation with OpenAPI auto-generation
+
+**Node.js 22 (Fastify + TypeScript) — Event consumers & BFF**:
+- Async I/O model ideal for event-driven consumers (Kafka, webhooks)
+- Rich ecosystem for push notifications (FCM, APNs), email (nodemailer), SMS
+- TypeScript for type safety across consumer contracts
+- Fastify performance (~45K RPS) for read-heavy API BFF layers
+
+**Go 1.22+ (Chi + sqlc) — Batch processing & ACL**:
+- Low-latency GC with sub-millisecond pause times
+- Goroutines for high-concurrency batch reconciliation and settlement
+- Single-binary deployment: minimal Docker image, fast cold start for autoscaling
+- `confluent-kafka-go` (librdkafka) for highest-throughput Kafka consumers
+- `sqlc` codegen for type-safe SQL without ORM overhead
+
+#### Rejected: Single-Language Approach
+
+| Alternative | Rejected Because |
+|-------------|-----------------|
+| Go-only (original ADR-001 draft) | Single language limits learning; Python better for ML, Java better for complex ACID transactions |
+| Java-only | Python ecosystem essential for fraud ML; Go superior for batch processing efficiency |
+| Python-only | Weak typing inadequate for financial core integrity; GIL limits concurrency |
+| Node.js-only | Single-threaded event loop not ideal for CPU-bound batch reconciliation |
 
 ---
 
 ### 4.2 Application Framework
 
-**Decision**: **Chi (Go HTTP router)** + **sqlc (DB codegen)** + **Watermill (eventing)**.
+**Decision**: **Per-language framework selection** optimized for each language's ecosystem.
+
+#### Java — Spring Boot 3.3
+
+| Component | Selection | Rationale |
+|-----------|-----------|-----------|
+| HTTP Framework | Spring Boot 3.3 (WebFlux optional) | Industry standard for Java microservices. Auto-configuration, embedded Tomcat. |
+| DB Access | Spring Data JPA + Hibernate 6 | Type-safe JPQL, `@Transactional` for ACID boundaries, pessimistic locking (`@Lock`). |
+| Validation | Bean Validation (Hibernate Validator) | `@NotNull`, `@Valid` — annotation-based validation matching OpenAPI schemas. |
+| Kafka Client | Spring Kafka | Declarative `@KafkaListener`, `KafkaTemplate`, exactly-once support. |
+| Avro | Confluent Avro Serializer | Schema Registry integration with `KafkaAvroSerializer`. |
+| Tracing | OpenTelemetry Java Agent | Auto-instrumentation: Spring Web, JPA, Kafka, JDBC — zero code changes. |
+| Resilience | Resilience4j | `@CircuitBreaker`, `@Retry`, `@Bulkhead`, `@RateLimiter` — declarative resilience. |
+| Security | Spring Security + OAuth2 Resource Server | Method-level `@PreAuthorize`, JWT RS256 validation, RBAC enforcement. |
+
+#### Python — FastAPI
+
+| Component | Selection | Rationale |
+|-----------|-----------|-----------|
+| HTTP Framework | FastAPI 0.111+ | Async-native, auto OpenAPI generation, Pydantic validation built-in. |
+| DB Access | SQLAlchemy 2.0 (async) | Async ORM with `selectinload` for eager loading. Raw SQL when needed. |
+| Validation | Pydantic v2 | Rust-core validation, JSON Schema generation, OpenAPI integration. |
+| Kafka Client | aiokafka | Async Kafka client for Python asyncio event loop. |
+| Avro | fastavro + confluent-kafka-python | Schema Registry + Avro serialization in Python. |
+| ML Runtime | scikit-learn / XGBoost | Fraud model scoring. Models serialized via joblib/pickle. |
+| Tracing | opentelemetry-instrumentation-fastapi | Auto-instrumentation: HTTP, SQLAlchemy, Kafka. |
+| Resilience | tenacity | `@retry` with exponential backoff, circuit breaker via custom middleware. |
+
+#### Node.js — Fastify + TypeScript
+
+| Component | Selection | Rationale |
+|-----------|-----------|-----------|
+| HTTP Framework | Fastify 5 + TypeScript | High performance (~45K RPS), schema-based validation, plugin architecture. |
+| DB Access | Prisma | Type-safe ORM with generated client, migrations, and relation queries. |
+| Validation | Zod + fastify-type-provider-zod | Runtime type checking with TypeScript inference. |
+| Kafka Client | KafkaJS | Pure JavaScript Kafka client — no native dependencies, good for consumer groups. |
+| Web Push | web-push + firebase-admin | Push notification delivery to FCM (Android) + APNs (iOS). |
+| Email | nodemailer | SMTP email delivery with template support. |
+| Tracing | @opentelemetry/sdk-node + auto-instrumentations-node | Auto-instrumentation: HTTP, Prisma, KafkaJS. |
+| Resilience | opossum | Node.js circuit breaker with fallback support. |
+
+#### Go — Chi + sqlc + Watermill
 
 | Component | Selection | Rationale |
 |-----------|-----------|-----------|
@@ -141,8 +210,6 @@ Every technology is scored on these dimensions:
 | Avro | `hamba/avro` | Pure Go Avro serialization with Schema Registry integration. |
 | Tracing | `go.opentelemetry.io/otel` | OTLP exporters for Jaeger. Auto-instrumentation for HTTP, gRPC, Kafka. |
 | Resilience | `sony/gobreaker` + custom retry | Circuit breaker + exponential backoff. |
-
-**Rejected**: `Gin` (too opinionated, reflection-heavy), `gorm` (hides SQL, can't express `SELECT FOR UPDATE NOWAIT`), `Fiber` (not stdlib-compatible).
 
 ---
 

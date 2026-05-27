@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: financial-core
+
+  datasource:
+    url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/financial_core_db}
+    username: ${DATASOURCE_USERNAME:payment}
+    password: ${DATASOURCE_PASSWORD:payment}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: false
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  level:
+    root: INFO
+    com.paymentapi: DEBUG
+  pattern:
+    console: '{"timestamp":"%d{ISO8601}","level":"%p","service":"${spring.application.name}","traceId":"%X{traceId}","spanId":"%X{spanId}","logger":"%c","message":"%m"}%n'

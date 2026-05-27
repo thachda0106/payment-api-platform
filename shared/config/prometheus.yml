@@ -1,0 +1,50 @@
+# ============================================================================
+# prometheus.yml — Prometheus metrics scraping configuration
+# ============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ─── Infrastructure ───
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ─── Java services (Spring Boot Actuator) ───
+  - job_name: "java-services"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      - targets:
+          - "financial-core:8080"
+          - "payment-service:8080"
+        labels:
+          language: "java"
+
+  # ─── Python services (prometheus_client) ───
+  - job_name: "python-services"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "fraud-service:8000"
+        labels:
+          language: "python"
+
+  # ─── Node.js services (prom-client) ───
+  - job_name: "nodejs-services"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "notification-service:3001"
+        labels:
+          language: "nodejs"
+
+  # ─── Go services (promhttp) ───
+  - job_name: "go-services"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "settlement-service:8088"
+        labels:
+          language: "go"

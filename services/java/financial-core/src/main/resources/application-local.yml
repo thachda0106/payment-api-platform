@@ -1,0 +1,15 @@
+# Local development overrides
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+logging:
+  level:
+    root: INFO
+    com.paymentapi: DEBUG
+    org.springframework.kafka: DEBUG

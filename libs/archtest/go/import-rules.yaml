@@ -1,0 +1,47 @@
+# libs/archtest/go/import-rules.yaml
+# Import boundary rules for Go platform-libs.
+# Enforced by: go run tools/importcheck (custom) or golangci-lint depguard.
+#
+# Rules:
+#   - ALL packages can import pkg/config
+#   - Packages cannot import each other (telemetry cannot import health, etc.)
+#   - Services cannot import from other services
+
+rules:
+  # ─── Libs internal boundaries ───
+  - name: "telemetry_must_not_import_health"
+    pattern: "github.com/payment-api/platform-libs/pkg/telemetry"
+    forbidden:
+      - "github.com/payment-api/platform-libs/pkg/health"
+      - "github.com/payment-api/platform-libs/pkg/metrics"
+      - "github.com/payment-api/platform-libs/pkg/errors"
+      - "github.com/payment-api/platform-libs/pkg/lifecycle"
+    allowed:
+      - "github.com/payment-api/platform-libs/pkg/config"
+
+  - name: "health_must_not_import_telemetry"
+    pattern: "github.com/payment-api/platform-libs/pkg/health"
+    forbidden:
+      - "github.com/payment-api/platform-libs/pkg/telemetry"
+      - "github.com/payment-api/platform-libs/pkg/metrics"
+      - "github.com/payment-api/platform-libs/pkg/errors"
+      - "github.com/payment-api/platform-libs/pkg/lifecycle"
+    allowed:
+      - "github.com/payment-api/platform-libs/pkg/config"
+
+  - name: "config_must_not_import_others"
+    pattern: "github.com/payment-api/platform-libs/pkg/config"
+    forbidden:
+      - "github.com/payment-api/platform-libs/pkg/telemetry"
+      - "github.com/payment-api/platform-libs/pkg/health"
+      - "github.com/payment-api/platform-libs/pkg/metrics"
+      - "github.com/payment-api/platform-libs/pkg/errors"
+      - "github.com/payment-api/platform-libs/pkg/lifecycle"
+
+  # ─── Service boundaries ───
+  - name: "service_must_not_import_other_service"
+    pattern: "github.com/payment-api/settlement-service"
+    forbidden:
+      - "github.com/payment-api/financial-core"
+      - "github.com/payment-api/fraud-service"
+      - "github.com/payment-api/notification-service"

@@ -1,0 +1,48 @@
+# ============================================================================
+# otel-collector-config.yaml — OpenTelemetry Collector Pipeline
+# ============================================================================
+# Receives OTLP from services → processes → exports to Jaeger.
+# Collector buffers, batches, and rate-limits traces before export.
+# ============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Prevent OOM under load — caps collector memory at 256 MiB
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # Batch spans before exporting to reduce network overhead
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Debug exporter — uncomment to log all spans to collector stdout
+  # debug:
+  #   verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - otlp/jaeger
+        # - debug   # Uncomment for debugging

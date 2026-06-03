@@ -1,0 +1,56 @@
+# .importlinter — Python import boundary rules
+# Enforced by: lint-imports (import-linter package)
+#
+# Rules:
+#   - ALL libs modules can import config
+#   - Libs modules cannot import each other
+#   - Services cannot import from other services
+
+[importlinter]
+root_package = "payment_platform"
+include_external_packages = false
+
+[[importlinter.contracts]]
+name = "telemetry_independent"
+type = "forbidden"
+source_modules = ["payment_platform.telemetry"]
+forbidden_modules = [
+    "payment_platform.health",
+    "payment_platform.metrics",
+    "payment_platform.errors",
+    "payment_platform.lifecycle",
+]
+# Config is allowed
+
+[[importlinter.contracts]]
+name = "health_independent"
+type = "forbidden"
+source_modules = ["payment_platform.health"]
+forbidden_modules = [
+    "payment_platform.telemetry",
+    "payment_platform.metrics",
+    "payment_platform.errors",
+    "payment_platform.lifecycle",
+]
+
+[[importlinter.contracts]]
+name = "config_independent"
+type = "forbidden"
+source_modules = ["payment_platform.config"]
+forbidden_modules = [
+    "payment_platform.telemetry",
+    "payment_platform.health",
+    "payment_platform.metrics",
+    "payment_platform.errors",
+    "payment_platform.lifecycle",
+]
+
+[[importlinter.contracts]]
+name = "service_boundaries"
+type = "forbidden"
+source_modules = ["fraud_service"]
+forbidden_modules = [
+    "financial_core",
+    "settlement_service",
+    "notification_service",
+]

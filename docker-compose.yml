@@ -187,9 +187,25 @@ services:
       COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
     ports:
       - "16686:16686"   # Jaeger UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
+      # OTLP ports NOT exposed to host — otel-collector handles ingress
       - "14250:14250"   # gRPC (legacy)
+    networks:
+      - payment-network
+
+  # OpenTelemetry Collector — Receives, batches, and exports traces
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    container_name: payment-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./shared/config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"     # OTLP gRPC (services → collector)
+      - "4318:4318"     # OTLP HTTP (services → collector)
+    depends_on:
+      jaeger:
+        condition: service_started
     networks:
       - payment-network
 
@@ -249,12 +265,17 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/financial_core_db
-      SPRING_DATASOURCE_USERNAME: payment
-      SPRING_DATASOURCE_PASSWORD: payment
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      SERVER_PORT: "8080"
+      DATABASE_URL: jdbc:postgresql://postgres:5432/financial_core_db
+      DATABASE_USERNAME: payment
+      DATABASE_PASSWORD: payment
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: financial-core
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: financial-core
+      SERVICE_VERSION: "0.1.0"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
     ports:
       - "8080:8080"
     networks:
@@ -276,11 +297,16 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      SERVER_PORT: "8000"
       DATABASE_URL: postgresql://payment:payment@postgres:5432/fraud_db
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      KAFKA_CONSUMER_GROUP: fraud-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: fraud-service
+      SERVICE_VERSION: "0.1.0"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
     ports:
       - "8000:8000"
     networks:
@@ -300,11 +326,15 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      SERVER_PORT: "3001"
       DATABASE_URL: postgresql://payment:payment@postgres:5432/notification_db
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: notification-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_SERVICE_NAME: notification-service
-      PORT: "3001"
+      SERVICE_VERSION: "0.1.0"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
     ports:
       - "3001:3001"
     networks:
@@ -324,11 +354,15 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://payment:payment@postgres:5432/settlement_db?sslmode=disable
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4317
-      OTEL_SERVICE_NAME: settlement-service
       SERVER_PORT: "8088"
+      DATABASE_URL: postgresql://payment:payment@postgres:5432/settlement_db?sslmode=disable
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: settlement-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: settlement-service
+      SERVICE_VERSION: "0.1.0"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
     ports:
       - "8088:8088"
     networks:

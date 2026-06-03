@@ -19,10 +19,16 @@
 
     <properties>
         <java.version>21</java.version>
-        <otel.version>1.37.0</otel.version>
     </properties>
 
     <dependencies>
+        <!-- Platform shared library -->
+        <dependency>
+            <groupId>com.paymentapi</groupId>
+            <artifactId>platform-libs</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+
         <!-- Spring Boot Starters -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -18,7 +18,6 @@ scrape_configs:
     static_configs:
       - targets:
           - "financial-core:8080"
-          - "payment-service:8080"
         labels:
           language: "java"
 
@@ -48,3 +47,12 @@ scrape_configs:
           - "settlement-service:8088"
         labels:
           language: "go"
+
+  # ─── OTel Collector ───
+  - job_name: "otel-collector"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "otel-collector:8888"
+        labels:
+          component: "otel-collector"

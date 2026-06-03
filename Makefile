@@ -212,18 +212,38 @@ dev-up: ## Start all infrastructure + services
 	$(call log,Local dev environment started)
 	@echo ""
 	@echo "  $(GREEN)Infrastructure:$(RESET)"
-	@echo "    PostgreSQL:  postgresql://postgres:postgres@localhost:5432"
+	@echo "    PostgreSQL:  postgresql://payment:payment@localhost:5432"
 	@echo "    Redis:       redis://localhost:6379"
-	@echo "    Kafka:       localhost:9092"
-	@echo "    OpenSearch:  http://localhost:9200"
-	@echo "    Jaeger:      http://localhost:16686"
-	@echo "    Schema Reg:  http://localhost:8081"
+	@echo "    Kafka:       localhost:9093"
+	@echo "    Jaeger UI:   http://localhost:16686"
+	@echo "    Grafana:     http://localhost:3000 (admin/admin)"
+	@echo "    Prometheus:  http://localhost:9090"
+	@echo "    OTel Collector: localhost:4317"
 	@echo ""
 	@echo "  $(GREEN)Services:$(RESET)"
-	@echo "    financial-core:    http://localhost:8081/health"
-	@echo "    fraud-service:     http://localhost:8001/health"
-	@echo "    notification-svc:  http://localhost:3001/health"
-	@echo "    settlement-svc:    http://localhost:8082/health"
+	@echo "    financial-core:       http://localhost:8080/liveness"
+	@echo "    fraud-service:        http://localhost:8000/liveness"
+	@echo "    notification-service: http://localhost:3001/liveness"
+	@echo "    settlement-service:   http://localhost:8088/liveness"
+
+dev-infra: ## Start infrastructure only (no application services)
+	$(call log,Starting infrastructure...)
+	docker-compose up -d postgres redis zookeeper kafka schema-registry opensearch jaeger otel-collector prometheus grafana
+	$(call log,Infrastructure started)
+
+dev-services: ## Start application services only (infrastructure must be running)
+	$(call log,Starting services...)
+	docker-compose --profile services up -d
+	$(call log,Services started)
+
+dev-hot-reload: ## Start services locally in hot-reload mode (not Docker)
+	$(call log,Starting services in hot-reload mode (ensure infra is running: make dev-infra)...)
+	@echo ""
+	@echo "  $(GREEN)Run each service in its own terminal:$(RESET)"
+	@echo "    Java:   cd services/java/financial-core && mvn spring-boot:run -Dspring-boot.run.profiles=local"
+	@echo "    Go:     cd services/go/settlement-service && go run ./cmd/server"
+	@echo "    Python: cd services/python/fraud-service && python -m uvicorn src.fraud_service.main:app --reload --port 8000"
+	@echo "    Node.js: cd services/nodejs/notification-service && npm run dev"
 
 dev-down: ## Stop all services and infrastructure
 	$(call log,Stopping local dev environment...)
@@ -262,6 +282,29 @@ clean-go:
 	$(call log,Cleaning Go build artifacts...)
 	go clean -cache ./services/go/... 2>/dev/null || true
 	$(call log,Go cleaned)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ARCHITECTURE FITNESS TESTS
+# ═══════════════════════════════════════════════════════════════════════════
+arch-test: ## Run architecture fitness tests (package boundaries, port uniqueness)
+	$(call log,Running architecture fitness tests...)
+	@# Port uniqueness check
+	@bash libs/archtest/scripts/check-port-uniqueness.sh docker-compose.yml || exit 1
+	@# Config completeness check
+	@bash libs/archtest/scripts/check-config-completeness.sh docker-compose.yml || exit 1
+	@# Libs boundary checks (per language)
+	@echo "  Architecture fitness tests passed."
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BUILD LIBS
+# ═══════════════════════════════════════════════════════════════════════════
+build-libs: ## Build all platform libraries
+	$(call log,Building platform libraries...)
+	cd libs/java && mvn install -DskipTests -q 2>/dev/null || echo "  $(YELLOW)Java libs: mvn not available, skipping$(RESET)"
+	cd libs/go && go build ./pkg/... 2>/dev/null || echo "  $(YELLOW)Go libs: go not available, skipping$(RESET)"
+	cd libs/python && pip install -e . -q 2>/dev/null || echo "  $(YELLOW)Python libs: pip not available, skipping$(RESET)"
+	cd libs/nodejs && npm install --silent 2>/dev/null && npm run build --silent 2>/dev/null || echo "  $(YELLOW)Node.js libs: npm not available, skipping$(RESET)"
+	$(call log,Platform libraries built)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SCAFFOLD

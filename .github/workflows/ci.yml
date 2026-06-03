@@ -97,6 +97,7 @@ jobs:
       matrix:
         service:
           - financial-core
+          - payment-service
     defaults:
       run:
         working-directory: services/java/${{ matrix.service }}
@@ -298,6 +299,12 @@ jobs:
           curl -sf http://localhost:8080/liveness | head -c 200
           echo ""
           curl -sf http://localhost:8080/readiness | head -c 200 || echo "(503 expected if deps not ready)"
+          echo ""
+
+          echo "=== Java payment-service ==="
+          curl -sf http://localhost:8081/liveness | head -c 200
+          echo ""
+          curl -sf http://localhost:8081/readiness | head -c 200 || echo "(503 expected if deps not ready)"
           echo ""
 
           echo "=== Python fraud-service ==="

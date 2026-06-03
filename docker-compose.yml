@@ -281,6 +281,36 @@ services:
     networks:
       - payment-network
 
+  # ─── Java: Payment Service (Payment API + Outbox) ───
+  payment-service:
+    profiles: ["services"]
+    build:
+      context: ./services/java/payment-service
+      dockerfile: ../../../../docker/Dockerfile.java
+    container_name: payment-payment-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: "8081"
+      DATABASE_URL: jdbc:postgresql://postgres:5432/payment_db
+      DATABASE_USERNAME: payment
+      DATABASE_PASSWORD: payment
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: payment-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: payment-service
+      SERVICE_VERSION: "0.1.0"
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+    ports:
+      - "8081:8081"
+    networks:
+      - payment-network
+
   # ─── Python: Fraud Service ───
   fraud-service:
     profiles: ["services"]

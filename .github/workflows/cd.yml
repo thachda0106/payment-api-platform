@@ -46,6 +46,11 @@ jobs:
             context: services/java/financial-core
             dockerfile: docker/Dockerfile.java
             port: "8080"
+          - service: payment-service
+            language: java
+            context: services/java/payment-service
+            dockerfile: docker/Dockerfile.java
+            port: "8081"
           # ─── Python ───
           - service: fraud-service
             language: python
@@ -163,6 +168,17 @@ jobs:
           curl -sf http://localhost:8080/liveness && echo "  financial-core: OK" || echo "  financial-core: FAIL"
           docker stop smoke-financial-core
 
+      - name: Pull and validate payment-service
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/payment-service:latest
+          docker run -d --rm --name smoke-payment-service \
+            -e SERVER_PORT=8081 -e OTEL_SERVICE_NAME=payment-service \
+            -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 -p 8081:8081 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/payment-service:latest
+          sleep 15
+          curl -sf http://localhost:8081/liveness && echo "  payment-service: OK" || echo "  payment-service: FAIL"
+          docker stop smoke-payment-service
+
       - name: Pull and validate fraud-service
         run: |
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/fraud-service:latest
@@ -208,6 +224,7 @@ jobs:
       matrix:
         service:
           - financial-core
+          - payment-service
           - fraud-service
           - notification-service
           - settlement-service

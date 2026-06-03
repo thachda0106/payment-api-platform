@@ -1,11 +1,11 @@
-"""
-Notification Service
-====================
-Generic domain service for push, email, SMS, and in-app notifications.
-Consumes events from Kafka and delivers via appropriate channels.
-
-Uses @payment-api/platform-libs for telemetry, health probes, and config.
-"""
+/**
+ * Notification Service
+ * ====================
+ * Generic domain service for push, email, SMS, and in-app notifications.
+ * Consumes events from Kafka and delivers via appropriate channels.
+ *
+ * Uses @payment-api/platform-libs for telemetry, health probes, and config.
+ */
 
 import Fastify from "fastify";
 import { loadConfig } from "@payment-api/platform-libs/config";

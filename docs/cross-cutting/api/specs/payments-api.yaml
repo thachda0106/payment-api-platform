@@ -3,11 +3,17 @@ info:
   title: "Payment API Platform — Payments"
   version: "1.0.0"
   description: |
-    Payment resource API for the MoMo-like Payment API Platform.
+    Payment resource API for the Payment API Platform.
     All mutating endpoints require `Idempotency-Key` header.
-    Auth: Bearer JWT (OAuth 2.0) or API Key (`sk_live_` / `sk_test_` prefix).
 
-    **Versioning**: URI `/v1/` + `API-Version: YYYY-MM-DD` header.
+    **⚠️ Phase 7 (Architecture Validation) Compatibility Note:**
+    This spec describes the TARGET v1.0 API (Stripe-inspired with `source_account_id`,
+    `destination_account_id`, `pay_*` IDs, and `processing/succeeded/failed` statuses).
+    The current vertical slice implementation uses a simplified model:
+    - Request: `amount`, `currency`, `merchantId`, `customerId`
+    - Response: `paymentId` (UUID), `status: "CREATED"`, `createdAt`
+    - Payment ID format: UUID (will migrate to `pay_*` format in Phase 8)
+    Full alignment with this spec is planned for Phase 8 (Observability & Hardening).
   contact:
     name: "Platform API Team"
     url: "https://docs.payments.platform.com"

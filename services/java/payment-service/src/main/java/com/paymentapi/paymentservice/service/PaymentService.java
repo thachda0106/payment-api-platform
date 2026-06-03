@@ -55,10 +55,11 @@ public class PaymentService {
 
         // 3. Create outbox event (same transaction — both or neither committed)
         OutboxEvent event = new OutboxEvent();
-        event.setEventId(UUID.randomUUID());
+        UUID eventId = UUID.randomUUID();
+        event.setEventId(eventId);
         event.setAggregateId(payment.getId());
         event.setEventType("PaymentCreated");
-        event.setPayload(toPayload(payment));
+        event.setPayload(toPayload(eventId, payment));  // Pass eventId to avoid regeneration
         event.setTraceId(traceId);
         outboxRepo.save(event);
 
@@ -66,10 +67,10 @@ public class PaymentService {
         return PaymentResponse.from(payment);
     }
 
-    private String toPayload(Payment p) {
+    private String toPayload(UUID eventId, Payment p) {
         try {
             return mapper.writeValueAsString(Map.of(
-                "eventId", UUID.randomUUID().toString(),
+                "eventId", eventId.toString(),
                 "type", "PaymentCreated",
                 "paymentId", p.getId().toString(),
                 "amount", p.getAmount(),

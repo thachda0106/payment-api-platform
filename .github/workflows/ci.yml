@@ -265,6 +265,8 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Build financial-core
         run: docker build -f docker/Dockerfile.java -t financial-core:ci services/java/financial-core
+      - name: Build payment-service
+        run: docker build -f docker/Dockerfile.java -t payment-service:ci services/java/payment-service
       - name: Build fraud-service
         run: docker build -f docker/Dockerfile.python -t fraud-service:ci services/python/fraud-service
       - name: Build notification-service

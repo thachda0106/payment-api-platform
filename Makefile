@@ -222,6 +222,7 @@ dev-up: ## Start all infrastructure + services
 	@echo ""
 	@echo "  $(GREEN)Services:$(RESET)"
 	@echo "    financial-core:       http://localhost:8080/liveness"
+	@echo "    payment-service:      http://localhost:8081/liveness"
 	@echo "    fraud-service:        http://localhost:8000/liveness"
 	@echo "    notification-service: http://localhost:3001/liveness"
 	@echo "    settlement-service:   http://localhost:8088/liveness"

@@ -1,0 +1,130 @@
+# ============================================================================
+# alert-rules.yml — Prometheus Alert Rules for Payment API Platform
+# ============================================================================
+groups:
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # CRITICAL — P1: wake up
+  # ═════════════════════════════════════════════════════════════════════════
+  - name: payment_critical
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          tier: platform
+        annotations:
+          summary: "{{ $labels.job }} is DOWN"
+          description: "Service {{ $labels.job }} has been down for > 1 minute."
+          runbook: "https://github.com/payment-api-platform/docs/cross-cutting/operations/runbooks/service-down.md"
+
+      - alert: DLQNotEmpty
+        expr: sum(kafka_consumergroup_lag{topic="payment-events-dlq"}) > 0
+        for: 30s
+        labels:
+          severity: critical
+          tier: platform
+        annotations:
+          summary: "DLQ contains poison messages"
+          description: "payment-events-dlq has messages. Investigate and replay or discard."
+          runbook: "https://github.com/payment-api-platform/docs/runbooks/dlg-growth.md"
+
+      - alert: PaymentSuccessRateCritical
+        expr: |
+          rate(payment_created_total[5m]) > 0
+          and
+          rate(payment_approved_total[5m]) / rate(payment_created_total[5m]) < 0.80
+        for: 5m
+        labels:
+          severity: critical
+          tier: business
+        annotations:
+          summary: "Payment approval rate < 80%"
+          description: "Fraud rejection rate may be abnormally high or processing is stuck."
+          runbook: "https://github.com/payment-api-platform/docs/runbooks/payment-processing-stuck.md"
+
+      - alert: LedgerBalanceBroken
+        expr: ledger_balance_invariant != 0
+        for: 1m
+        labels:
+          severity: critical
+          tier: business
+        annotations:
+          summary: "Double-entry balance invariant VIOLATED"
+          description: "SUM(debit) - SUM(credit) != 0. Immediate investigation required."
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # WARNING — P2: investigate during business hours
+  # ═════════════════════════════════════════════════════════════════════════
+  - name: payment_warning
+    rules:
+      - alert: ConsumerLagHigh
+        expr: kafka_consumergroup_lag > 500
+        for: 5m
+        labels:
+          severity: warning
+          tier: platform
+        annotations:
+          summary: "Consumer lag high: {{ $labels.consumer_group }} = {{ $value }}"
+          description: "Consumer group {{ $labels.consumer_group }} has {{ $value }} messages behind."
+
+      - alert: High5xxErrorRate
+        expr: |
+          rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "5xx error rate > 5% on {{ $labels.job }}"
+          description: "Service {{ $labels.job }} returning {{ $value }}% 5xx errors."
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: hikaricp_connections_pending > 5
+        for: 2m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "DB connection pool exhausted on {{ $labels.job }}"
+          description: "{{ $value }} connections pending. Check pool size and slow queries."
+          runbook: "https://github.com/payment-api-platform/docs/runbooks/db-connection-exhaustion.md"
+
+      - alert: OutboxBacklogGrowing
+        expr: rate(payment_outbox_created_total[15m]) > rate(payment_outbox_published_total[15m])
+        for: 10m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "Outbox backlog growing — publishing slower than creation"
+          description: "OutboxPoller may be stuck or Kafka producer is slow."
+          runbook: "https://github.com/payment-api-platform/docs/runbooks/outbox-backlog-growth.md"
+
+      - alert: PaymentLatencyHigh
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="payment-service"}[5m])) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "Payment API p95 latency > 300ms"
+
+      - alert: FraudScoringLatencyHigh
+        expr: histogram_quantile(0.95, rate(event_processing_duration_seconds_bucket{job="fraud-service"}[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "Fraud scoring p95 latency > 200ms"
+
+      - alert: DiskSpaceLow
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.10
+        for: 5m
+        labels:
+          severity: warning
+          tier: infrastructure
+        annotations:
+          summary: "Disk space < 10% on {{ $labels.instance }}"

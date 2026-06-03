@@ -1,10 +1,20 @@
 # ============================================================================
-# prometheus.yml — Prometheus metrics scraping configuration
+# prometheus.yml — Prometheus metrics scraping + alert rules
 # ============================================================================
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+
+# ─── Alert Rules ──────────────────────────────────────────────────────────
+rule_files:
+  - "/etc/prometheus/alert-rules.yml"
+
+# ─── Alertmanager (optional) ──────────────────────────────────────────────
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
 
 scrape_configs:
   # ─── Infrastructure ───

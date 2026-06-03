@@ -216,6 +216,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./shared/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./shared/config/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - promdata:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

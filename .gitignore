@@ -1,0 +1,35 @@
+# ============================================================================
+# Compiled artifacts & build output — never commit
+# ============================================================================
+
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.so
+
+# Node.js / TypeScript
+node_modules/
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Go
+*.exe
+*.test
+bin/
+
+# Env & local secrets
+.env
+.env.*
+!.env.example

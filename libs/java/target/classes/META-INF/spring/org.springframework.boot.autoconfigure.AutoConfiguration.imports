@@ -1,3 +1,0 @@
-com.paymentapi.platform.health.HealthAutoConfiguration
-com.paymentapi.platform.config.ConfigValidationConfig
-com.paymentapi.platform.lifecycle.GracefulShutdownConfig

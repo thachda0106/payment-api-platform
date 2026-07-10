@@ -3,6 +3,7 @@ package com.paymentapi.financialcore.consumer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentapi.financialcore.entity.LedgerOutboxEvent;
+import com.paymentapi.financialcore.metrics.OutboxMetrics;
 import com.paymentapi.financialcore.repository.LedgerOutboxRepository;
 import com.paymentapi.financialcore.repository.ProcessedEventRepository;
 import com.paymentapi.financialcore.service.LedgerService;
@@ -37,17 +38,20 @@ public class FraudEventConsumer {
     private final ProcessedEventRepository processedEventRepo;
     private final LedgerOutboxRepository ledgerOutboxRepo;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final OutboxMetrics metrics;
     private final ObjectMapper mapper;
 
     public FraudEventConsumer(LedgerService ledgerService,
                               ProcessedEventRepository processedEventRepo,
                               LedgerOutboxRepository ledgerOutboxRepo,
                               KafkaTemplate<String, String> kafkaTemplate,
+                              OutboxMetrics metrics,
                               ObjectMapper mapper) {
         this.ledgerService = ledgerService;
         this.processedEventRepo = processedEventRepo;
         this.ledgerOutboxRepo = ledgerOutboxRepo;
         this.kafkaTemplate = kafkaTemplate;
+        this.metrics = metrics;
         this.mapper = mapper;
     }
 
@@ -141,6 +145,7 @@ public class FraudEventConsumer {
                 "original", rawMessage
             ));
             kafkaTemplate.send(DLQ_TOPIC, dlqPayload);
+            metrics.incrementDlq();
         } catch (Exception e) {
             log.error("Failed to send to DLQ: {}", e.getMessage());
         }

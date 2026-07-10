@@ -73,8 +73,8 @@ async function start() {
   });
 
   // 6. Backward compat redirects
-  app.get("/health", async (_req, reply) => reply.redirect(301, "/liveness"));
-  app.get("/ready", async (_req, reply) => reply.redirect(301, "/readiness"));
+  app.get("/health", async (_req, reply) => reply.redirect("/liveness", 301));
+  app.get("/ready", async (_req, reply) => reply.redirect("/readiness", 301));
 
   // 7. Graceful shutdown
   const shutdown = async () => {

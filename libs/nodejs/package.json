@@ -5,6 +5,12 @@
   "description": "Payment API Platform — shared foundation library for Node.js services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./config": { "types": "./dist/config.d.ts", "default": "./dist/config.js" },
+    "./health": { "types": "./dist/health.d.ts", "default": "./dist/health.js" },
+    "./telemetry": { "types": "./dist/telemetry.d.ts", "default": "./dist/telemetry.js" }
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",

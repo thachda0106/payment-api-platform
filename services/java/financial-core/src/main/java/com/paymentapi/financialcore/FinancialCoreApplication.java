@@ -4,6 +4,8 @@ import com.paymentapi.platform.health.CachedDependencyRegistry;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
+import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
@@ -23,16 +25,25 @@ public class FinancialCoreApplication {
     }
 
     /**
-     * Register database health check with the platform's cached dependency registry.
+     * Register database + Kafka health checks with the platform's cached dependency registry.
      */
     @Bean
-    public Object registerHealthChecks(CachedDependencyRegistry registry, DataSource dataSource) {
+    public Object registerHealthChecks(CachedDependencyRegistry registry,
+                                       DataSource dataSource,
+                                       KafkaListenerEndpointRegistry kafkaListenerRegistry) {
         registry.register("database", () -> {
             try (Connection conn = dataSource.getConnection()) {
                 return conn.isValid(3);
             } catch (Exception e) {
                 return false;
             }
+        });
+        // Honest Kafka health: the @KafkaListener container must actually be running,
+        // not merely that the Spring context started.
+        registry.register("kafka", () -> {
+            var containers = kafkaListenerRegistry.getListenerContainers();
+            return !containers.isEmpty()
+                && containers.stream().allMatch(MessageListenerContainer::isRunning);
         });
         return new Object();
     }

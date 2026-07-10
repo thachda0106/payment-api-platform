@@ -12,7 +12,7 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
   ATTR_SERVICE_NAMESPACE,
-  ATTR_DEPLOYMENT_ENVIRONMENT,
+  ATTR_DEPLOYMENT_ENVIRONMENT_NAME,
 } from '@opentelemetry/semantic-conventions';
 
 let sdk: NodeSDK | null = null;
@@ -31,7 +31,7 @@ export function initTelemetry(
     [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_VERSION]: serviceVersion,
     [ATTR_SERVICE_NAMESPACE]: 'payment-api',
-    [ATTR_DEPLOYMENT_ENVIRONMENT]: environment,
+    [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: environment,
   });
 
   // Strip http:// prefix for gRPC

@@ -1,27 +1,35 @@
-import { describe, it, expect } from "vitest";
-import { app } from "../src/main";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import Fastify, { FastifyInstance } from "fastify";
+import { healthPlugin, CachedDependencyRegistry } from "@payment-api/platform-libs/health";
 
 describe("Health endpoints", () => {
-  it("GET /health returns UP", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/health",
-    });
+  let app: FastifyInstance;
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.status).toBe("UP");
+  beforeAll(async () => {
+    app = Fastify();
+    await app.register(healthPlugin, {
+      serviceName: "notification-service",
+      version: "0.1.0",
+      registry: new CachedDependencyRegistry(5),
+    });
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("GET /liveness returns ok", async () => {
+    const res = await app.inject({ method: "GET", url: "/liveness" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("ok");
     expect(body.service).toBe("notification-service");
   });
 
-  it("GET /ready returns READY", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/ready",
-    });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.status).toBe("READY");
+  it("GET /readiness returns ok when no dependencies are registered", async () => {
+    const res = await app.inject({ method: "GET", url: "/readiness" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("ok");
   });
 });

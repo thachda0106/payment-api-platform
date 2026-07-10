@@ -2,16 +2,19 @@
 Multi-rule fraud detection engine.
 
 Rules:
-  1. High-value transactions (>$1000) → REVIEW
-  2. Velocity check (>3 txns per minute per customer) → REJECTED
+  1. High-value transactions (> threshold) → REVIEW
+  2. Velocity check (> N txns per window per customer) → REJECTED
   3. Merchant blacklist → REJECTED
 
 Returns: FraudResult with score, decision, reason.
+Thresholds come from FraudSettings (env FRAUD_*).
 """
 
 import time
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List, Optional
+
+from fraud_service.config import FraudSettings, fraud_settings
 
 
 @dataclass
@@ -23,15 +26,14 @@ class FraudResult:
 
 
 class FraudScorer:
-    HIGH_VALUE_THRESHOLD = 1000.00
-    VELOCITY_THRESHOLD = 3       # max transactions per minute
-    VELOCITY_WINDOW = 60          # seconds
     BLACKLISTED_MERCHANTS = {"fraud-merchant-1", "suspicious-merchant-99"}
 
-    def __init__(self):
-        # In-memory velocity tracker (per customer: list of timestamps)
+    def __init__(self, settings: Optional[FraudSettings] = None):
+        self._cfg = settings or fraud_settings
+        # In-memory velocity tracker (per customer: list of timestamps).
         # Phase 7: in-memory. Phase 8: Redis-backed.
-        self._velocity_tracker: Dict[str, list] = {}
+        self._velocity_tracker: Dict[str, List[float]] = {}
+        self._score_count = 0
 
     def score(self, payment: dict) -> FraudResult:
         """Score a payment and return decision."""
@@ -45,18 +47,18 @@ class FraudScorer:
         decision = "APPROVED"
 
         # Rule 1: High-value transaction
-        if amount > self.HIGH_VALUE_THRESHOLD:
+        if amount > self._cfg.high_value_threshold:
             decision = "REVIEW"
             score = max(score, 30.0)
-            reasons.append(f"High-value: ${amount:.2f} > ${self.HIGH_VALUE_THRESHOLD}")
+            reasons.append(f"High-value: ${amount:.2f} > ${self._cfg.high_value_threshold}")
 
         # Rule 2: Velocity check
         velocity_count = self._check_velocity(customer_id)
-        if velocity_count > self.VELOCITY_THRESHOLD:
+        if velocity_count > self._cfg.velocity_threshold:
             decision = "REJECTED"
             score = max(score, 80.0)
             reasons.append(
-                f"Velocity exceeded: {velocity_count} txns in {self.VELOCITY_WINDOW}s"
+                f"Velocity exceeded: {velocity_count} txns in {self._cfg.velocity_window_seconds}s"
             )
 
         # Rule 3: Merchant blacklist
@@ -76,18 +78,25 @@ class FraudScorer:
         )
 
     def _check_velocity(self, customer_id: str) -> int:
-        """Count transactions in the velocity window."""
+        """Count transactions in the velocity window (bounded memory)."""
         now = time.time()
-        if customer_id not in self._velocity_tracker:
-            self._velocity_tracker[customer_id] = []
+        window_start = now - self._cfg.velocity_window_seconds
 
-        # Clean old entries
-        window_start = now - self.VELOCITY_WINDOW
-        self._velocity_tracker[customer_id] = [
-            t for t in self._velocity_tracker[customer_id] if t > window_start
-        ]
+        timestamps = self._velocity_tracker.get(customer_id, [])
+        timestamps = [t for t in timestamps if t > window_start]
+        timestamps.append(now)
+        self._velocity_tracker[customer_id] = timestamps
 
-        # Record this transaction
-        self._velocity_tracker[customer_id].append(now)
+        # Periodically evict customers with no activity in the window so the
+        # tracker does not grow unbounded with one-off customers.
+        self._score_count += 1
+        if self._score_count % self._cfg.velocity_sweep_every == 0:
+            self._sweep_stale(window_start)
 
-        return len(self._velocity_tracker[customer_id])
+        return len(timestamps)
+
+    def _sweep_stale(self, window_start: float) -> None:
+        stale = [c for c, ts in self._velocity_tracker.items()
+                 if not ts or ts[-1] <= window_start]
+        for c in stale:
+            del self._velocity_tracker[c]

@@ -1,35 +1,22 @@
-"""Application configuration loaded from environment variables."""
+"""Fraud-specific tunables.
 
-from pydantic_settings import BaseSettings
+Platform config (database, kafka, redis, otel, server) is provided by
+`payment_platform.config.PlatformSettings` in main.py. This module holds ONLY
+fraud-domain thresholds, loaded from environment variables (FRAUD_* prefix).
+"""
 
-
-class Settings(BaseSettings):
-    """Fraud service configuration."""
-
-    # Service
-    service_name: str = "fraud-service"
-    debug: bool = False
-    cors_origins: list[str] = ["*"]
-
-    # Database
-    database_url: str = "postgresql+asyncpg://payment:payment@localhost:5432/fraud_db"
-
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
-
-    # Kafka
-    kafka_bootstrap_servers: str = "localhost:9092"
-    kafka_consumer_group: str = "fraud-service"
-
-    # Observability
-    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
-
-    # Fraud-specific
-    fraud_score_threshold: float = 0.7
-    velocity_window_seconds: int = 300  # 5 minutes
-    max_transactions_per_window: int = 10
-
-    model_config = {"env_prefix": "", "case_sensitive": False}
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-settings = Settings()
+class FraudSettings(BaseSettings):
+    """Fraud scoring thresholds."""
+
+    model_config = SettingsConfigDict(env_prefix="FRAUD_", case_sensitive=False)
+
+    high_value_threshold: float = 1000.0     # amount above this → REVIEW
+    velocity_threshold: int = 3               # max transactions per window → REJECTED
+    velocity_window_seconds: int = 60         # velocity sliding window
+    velocity_sweep_every: int = 1000          # prune stale customers every N scores
+
+
+fraud_settings = FraudSettings()

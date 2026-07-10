@@ -120,6 +120,30 @@ services:
     networks:
       - payment-network
 
+  # Kafka init — creates persistent DLQ topics with explicit retention
+  kafka-init-topics:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: payment-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Creating DLQ topics..."
+        for topic in payment-events-dlq fraud-events-dlq ledger-events-dlq; do
+          kafka-topics --bootstrap-server kafka:9092 \
+            --create --if-not-exists \
+            --topic $$topic \
+            --partitions 3 \
+            --config retention.ms=2592000000 \
+            --config cleanup.policy=delete \
+            || echo "Topic $$topic already exists (that's fine)"
+        done
+        echo "DLQ topics created."
+    networks:
+      - payment-network
+
   # Confluent Schema Registry — Avro schema management
   schema-registry:
     image: confluentinc/cp-schema-registry:7.6.0

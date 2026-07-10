@@ -12,9 +12,11 @@ public class ProcessedEventRepository {
     /** Returns true if event was successfully marked (first time). */
     public boolean markAsProcessed(String eventId, String consumerGroup) {
         int rows = jdbc.update(
-            """INSERT INTO processed_events (event_id, consumer_group, processed_at)
-               VALUES (?, ?, now())
-               ON CONFLICT (event_id, consumer_group) DO NOTHING""",
+            """
+            INSERT INTO processed_events (event_id, consumer_group, processed_at)
+            VALUES (?, ?, now())
+            ON CONFLICT (event_id, consumer_group) DO NOTHING
+            """,
             eventId, consumerGroup
         );
         return rows > 0;  // true = first time, false = duplicate

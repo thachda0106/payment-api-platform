@@ -1,16 +1,19 @@
 /**
  * Notification Service
  * ====================
- * Generic domain service for push, email, SMS, and in-app notifications.
- * Consumes events from Kafka and delivers via appropriate channels.
+ * Consumes `ledger-events`, records notifications, and publishes `notification-events`
+ * via a transactional outbox.
  *
  * Uses @payment-api/platform-libs for telemetry, health probes, and config.
  */
 
 import Fastify from "fastify";
+import { Kafka, logLevel } from "kafkajs";
+import { Pool } from "pg";
 import { loadConfig } from "@payment-api/platform-libs/config";
 import { initTelemetry } from "@payment-api/platform-libs/telemetry";
 import { healthPlugin, CachedDependencyRegistry } from "@payment-api/platform-libs/health";
+import { NotificationConsumer, NotificationOutboxPoller } from "./consumer";
 
 async function start() {
   // 1. Load config (fails fast on missing required values)
@@ -33,18 +36,36 @@ async function start() {
     },
   });
 
-  // 4. Cached dependency registry
+  // 4. Dependencies (DB pool + Kafka) — created before health registration
   const registry = new CachedDependencyRegistry(5);
 
-  // Register checks if modules are configured
+  let pool: Pool | null = null;
   if (config.database) {
-    // Database check will be registered when pool is created (Phase 7)
-  }
-  if (config.kafka) {
-    // Kafka check will be registered when client is created (Phase 7)
+    pool = new Pool({
+      connectionString: config.database.url,
+      max: config.database.maxPoolSize,
+    });
+    registry.register("database", async () => {
+      await pool!.query("SELECT 1");
+      return true;
+    });
   }
 
-  // 5. Register plugins
+  let consumer: NotificationConsumer | null = null;
+  let poller: NotificationOutboxPoller | null = null;
+  let kafkaReady = false;
+  if (config.kafka && pool) {
+    const kafka = new Kafka({
+      clientId: config.otel.serviceName,
+      brokers: config.kafka.bootstrapServers.split(","),
+      logLevel: logLevel.NOTHING,
+    });
+    consumer = new NotificationConsumer(kafka, pool);
+    poller = new NotificationOutboxPoller(pool, kafka.producer());
+    registry.register("kafka", () => kafkaReady);
+  }
+
+  // 5. Register health plugin
   await app.register(healthPlugin, {
     serviceName: config.otel.serviceName,
     version: config.otel.serviceVersion,
@@ -52,16 +73,19 @@ async function start() {
   });
 
   // 6. Backward compat redirects
-  app.get("/health", async (_req, reply) => {
-    return reply.redirect(301, "/liveness");
-  });
-  app.get("/ready", async (_req, reply) => {
-    return reply.redirect(301, "/readiness");
-  });
+  app.get("/health", async (_req, reply) => reply.redirect(301, "/liveness"));
+  app.get("/ready", async (_req, reply) => reply.redirect(301, "/readiness"));
 
   // 7. Graceful shutdown
   const shutdown = async () => {
     app.log.info("Notification Service shutting down gracefully...");
+    try {
+      if (consumer) await consumer.shutdown();
+      if (poller) await poller.shutdown();
+      if (pool) await pool.end();
+    } catch (err) {
+      app.log.error(err);
+    }
     await app.close();
     await sdk.shutdown();
     process.exit(0);
@@ -69,10 +93,17 @@ async function start() {
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  // 8. Start server
+  // 8. Start server, then the event pipeline
   try {
     await app.listen({ port: config.server.port, host: config.server.host });
     app.log.info(`Notification Service listening on ${config.server.host}:${config.server.port}`);
+
+    if (poller) await poller.start();
+    if (consumer) {
+      await consumer.start();
+      kafkaReady = true;
+      app.log.info("notification-service event pipeline started");
+    }
   } catch (err) {
     app.log.error(err);
     process.exit(1);

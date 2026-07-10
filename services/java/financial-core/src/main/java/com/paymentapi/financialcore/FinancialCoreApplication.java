@@ -4,6 +4,7 @@ import com.paymentapi.platform.health.CachedDependencyRegistry;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -14,6 +15,7 @@ import java.sql.Connection;
  * OTel Java Agent handles auto-instrumentation (HTTP, JPA, Kafka).
  */
 @SpringBootApplication(scanBasePackages = "com.paymentapi")
+@EnableScheduling  // For LedgerOutboxPoller
 public class FinancialCoreApplication {
 
     public static void main(String[] args) {

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -41,7 +42,12 @@ public class LedgerService {
     }
 
     @Transactional
-    public UUID postPayment(UUID paymentId, String customerId, String merchantId, BigDecimal amount) {
+    public Optional<UUID> postPayment(UUID paymentId, String customerId, String merchantId, BigDecimal amount) {
+        if (journalEntryRepo.existsByPaymentId(paymentId)) {
+            log.info("Payment {} already posted to ledger — idempotent no-op", paymentId);
+            return journalEntryRepo.findFirstByPaymentId(paymentId)
+                .map(JournalEntry::getLedgerTransactionId);
+        }
         BigDecimal fee = amount.multiply(FEE_RATE).setScale(SCALE, RoundingMode.HALF_UP);
         BigDecimal merchantAmount = amount.subtract(fee);
 
@@ -64,7 +70,7 @@ public class LedgerService {
         log.info("Ledger posted: txn={} payment={} amount={} fee={}",
             ledgerTxnId, paymentId, amount, fee);
 
-        return ledgerTxnId;
+        return Optional.of(ledgerTxnId);
     }
 
     private void debit(Account account, BigDecimal amount, UUID paymentId,

@@ -74,13 +74,42 @@ else
     echo -e "  $FAIL  Idempotency failed: expected $PAYMENT_ID, got $PAYMENT_ID2"
 fi
 
-# ─── 4. Wait for Event Processing ─────────────────────────────────────────
+# ─── 4. Poll for Event Processing ─────────────────────────────────────────
 echo ""
 echo "=== 4. Event Flow Processing ==="
-echo "  Waiting 15s for: PaymentCreated → FraudCheck → Ledger → Notification..."
-sleep 15
+echo "  Polling for: PaymentCreated → Fraud → Ledger → Notification... (timeout 120s)"
+TIMEOUT=120
+ELAPSED=0
+INTERVAL=3
 
-# ─── 5. Verify Fraud Score ────────────────────────────────────────────────
+FRAUD_OK=false; LEDGER_OK=false; NOTIF_OK=false
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    if [ "$FRAUD_OK" = false ]; then
+        FRAUD_ROW=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
+          "SELECT decision,score FROM fraud_scores WHERE payment_id='$PAYMENT_ID' LIMIT 1" 2>/dev/null || echo "")
+        [ -n "$FRAUD_ROW" ] && FRAUD_OK=true
+    fi
+    if [ "$LEDGER_OK" = false ]; then
+        C=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
+          "SELECT COUNT(*) FROM journal_entries WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
+        [ "$C" -ge 3 ] && LEDGER_OK=true
+    fi
+    if [ "$NOTIF_OK" = false ]; then
+        C=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
+          "SELECT COUNT(*) FROM notifications WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
+        [ "$C" -gt 0 ] && NOTIF_OK=true
+    fi
+
+    if [ "$FRAUD_OK" = true ] && [ "$LEDGER_OK" = true ] && [ "$NOTIF_OK" = true ]; then
+        echo "  All services processed after ${ELAPSED}s"
+        break
+    fi
+
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+
+# ─── 5. Verify Fraud Score (with outbox) ───────────────────────────────────
 echo ""
 echo "=== 5. Verify Fraud Score ==="
 FRAUD_ROW=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
@@ -88,11 +117,18 @@ FRAUD_ROW=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
 
 if [ -n "$FRAUD_ROW" ]; then
     echo -e "  $PASS  Fraud scored: $FRAUD_ROW"
+    OBOX=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
+      "SELECT COUNT(*) FROM fraud_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
+    if [ "$OBOX" -gt 0 ]; then
+        echo -e "  $PASS  fraud_outbox published ($OBOX row(s))"
+    else
+        echo -e "  $WARN  fraud_outbox not yet published"
+    fi
 else
     echo -e "  $FAIL  No fraud score found for payment $PAYMENT_ID"
 fi
 
-# ─── 6. Verify Ledger Entries ─────────────────────────────────────────────
+# ─── 6. Verify Ledger Entries (with outbox) ────────────────────────────────
 echo ""
 echo "=== 6. Verify Double-Entry Ledger ==="
 LEDGER_COUNT=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
@@ -100,6 +136,13 @@ LEDGER_COUNT=$(docker exec payment-postgres psql -U payment -d financial_core_db
 
 if [ "$LEDGER_COUNT" -ge 3 ]; then
     echo -e "  $PASS  Journal entries: $LEDGER_COUNT (expected >= 3)"
+    OBOX=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
+      "SELECT COUNT(*) FROM ledger_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
+    if [ "$OBOX" -gt 0 ]; then
+        echo -e "  $PASS  ledger_outbox published ($OBOX row(s))"
+    else
+        echo -e "  $WARN  ledger_outbox not yet published"
+    fi
 else
     echo -e "  $FAIL  Journal entries: $LEDGER_COUNT (expected >= 3)"
 fi
@@ -115,7 +158,7 @@ else
     echo -e "  $WARN  Double-entry balance: $BALANCE (check if events still processing)"
 fi
 
-# ─── 7. Verify Notification ───────────────────────────────────────────────
+# ─── 7. Verify Notification (with outbox) ──────────────────────────────────
 echo ""
 echo "=== 7. Verify Notification ==="
 NOTIF_COUNT=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
@@ -123,6 +166,13 @@ NOTIF_COUNT=$(docker exec payment-postgres psql -U payment -d notification_db -t
 
 if [ "$NOTIF_COUNT" -gt 0 ]; then
     echo -e "  $PASS  Notification sent: $NOTIF_COUNT record(s)"
+    OBOX=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
+      "SELECT COUNT(*) FROM notification_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
+    if [ "$OBOX" -gt 0 ]; then
+        echo -e "  $PASS  notification_outbox published ($OBOX row(s))"
+    else
+        echo -e "  $WARN  notification_outbox not yet published"
+    fi
 else
     echo -e "  $WARN  Notification not found (may still be processing)"
 fi

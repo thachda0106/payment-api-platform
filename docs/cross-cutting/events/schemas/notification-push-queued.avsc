@@ -1,0 +1,78 @@
+{
+  "type": "record",
+  "name": "PushQueued",
+  "namespace": "com.paymentplatform.notifications",
+  "doc": "Push notification queued. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "push.queued"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "PushQueuedData",
+        "fields": [
+          {
+            "name": "user_id",
+            "type": "string"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "payment_id",
+            "type": [
+              "null",
+              "string"
+            ],
+            "default": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

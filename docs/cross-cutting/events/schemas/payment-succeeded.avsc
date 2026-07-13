@@ -2,10 +2,10 @@
   "type": "record",
   "name": "PaymentSucceeded",
   "namespace": "com.paymentplatform.payments",
-  "doc": "Emitted when a payment double-entry validation passes and funds are transferred. FULL compatibility mode.",
+  "doc": "Emitted when fraud approves a payment and it is cleared for ledger posting (serial chain). BACKWARD compatibility.",
   "fields": [
-    { "name": "id", "type": "string", "doc": "CloudEvents event ID (UUID v7)" },
-    { "name": "type", "type": "string", "doc": "Event type discriminator" },
+    { "name": "id", "type": "string", "doc": "CloudEvents event ID (== outbox row id / dedup key)" },
+    { "name": "type", "type": "string", "doc": "Event type discriminator: payment.succeeded" },
     { "name": "time", "type": "string", "doc": "RFC 3339 timestamp" },
     {
       "name": "data",
@@ -13,17 +13,14 @@
         "type": "record",
         "name": "PaymentSucceededData",
         "fields": [
-          { "name": "payment_id", "type": "string", "doc": "Unique payment identifier (pay_ prefix)" },
-          { "name": "source_account_id", "type": "string", "doc": "Source account ID (payer)" },
-          { "name": "destination_account_id", "type": "string", "doc": "Destination account ID (payee)" },
-          { "name": "amount", "type": "long", "doc": "Payment amount in minor currency unit" },
+          { "name": "payment_id", "type": "string", "doc": "Unique payment identifier (UUID)" },
+          { "name": "customer_id", "type": "string", "doc": "Payer external reference" },
+          { "name": "merchant_id", "type": "string", "doc": "Payee external reference" },
+          { "name": "amount", "type": "long", "doc": "Payment amount in minor currency unit (cents)" },
           { "name": "currency", "type": "string", "doc": "ISO 4217 3-letter currency code" },
-          { "name": "description", "type": ["null", "string"], "default": null, "doc": "Human-readable description" },
-          { "name": "ledger_entry_id", "type": "string", "doc": "Journal entry identifier (entry_ prefix)" },
-          { "name": "source_running_balance", "type": "long", "doc": "Source account balance after debit" },
-          { "name": "destination_running_balance", "type": "long", "doc": "Destination account balance after credit" },
-          { "name": "metadata", "type": { "type": "map", "values": "string" }, "default": {}, "doc": "User-defined key-value pairs" },
-          { "name": "succeeded_at", "type": "long", "doc": "Unix epoch seconds when the payment succeeded" }
+          { "name": "fraud_score", "type": ["null", "double"], "default": null, "doc": "Fraud score assigned during review" },
+          { "name": "fraud_decision", "type": "string", "default": "APPROVED", "doc": "Fraud decision (APPROVED)" },
+          { "name": "metadata", "type": { "type": "map", "values": "string" }, "default": {}, "doc": "User-defined key-value pairs" }
         ]
       }
     },
@@ -34,9 +31,9 @@
         "name": "EventTrigger",
         "fields": [
           { "name": "service", "type": "string", "doc": "Producing service name" },
-          { "name": "instance", "type": "string", "doc": "Service instance identifier" },
-          { "name": "request_id", "type": "string", "doc": "Originating API request ID (req_ prefix)" },
-          { "name": "idempotency_key", "type": "string", "doc": "Idempotency key from the originating API request" }
+          { "name": "instance", "type": "string", "default": "", "doc": "Service instance identifier" },
+          { "name": "request_id", "type": "string", "default": "", "doc": "Originating API request ID" },
+          { "name": "idempotency_key", "type": "string", "default": "", "doc": "Idempotency key from the originating request" }
         ]
       }
     }

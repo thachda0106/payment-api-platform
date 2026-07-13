@@ -1,62 +1,47 @@
 # ============================================================================
-# Dockerfile.nodejs — Node.js (Fastify + TypeScript) multi-stage build
+# Dockerfile.nodejs — Node.js (Fastify + TS) multi-stage build (context: repo root)
 # ============================================================================
-# Build:  docker build -f docker/Dockerfile.nodejs -t payment-api/{svc}:latest services/nodejs/{svc}
-# Run:    docker run -p 3000:3000 payment-api/{svc}:latest
+# Usage:
+#   docker build -f docker/Dockerfile.nodejs --build-arg SERVICE_PATH=services/nodejs/notification-service -t payment-api/notification-service:latest .
+#   docker compose build notification-service  (handled by docker-compose.yml)
+#
+# The repo layout is preserved inside the image so the service's
+# `file:../../../libs/nodejs` dependency resolves exactly as it does locally.
 # ============================================================================
 
-# ─── Stage 1: Dependencies ─────────────────────────────────────────────────
-FROM node:22-alpine AS deps
-
-WORKDIR /app
-
-# Copy dependency manifests
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm ci --only=production --ignore-scripts
-
-# ─── Stage 2: Build ────────────────────────────────────────────────────────
+# ─── Stage 1: Build (shared lib + service) ──────────────────────────────────
 FROM node:22-alpine AS builder
+ARG SERVICE_PATH
+WORKDIR /repo
 
-WORKDIR /app
+# Build the shared platform lib first
+COPY libs/nodejs /repo/libs/nodejs
+RUN cd /repo/libs/nodejs && npm install --legacy-peer-deps && npm run build
 
-# Copy dependency manifests and install all deps
-COPY package*.json ./
-RUN npm ci
+# Build the service (path preserved so file: dependency resolves)
+COPY ${SERVICE_PATH} /repo/${SERVICE_PATH}
+RUN cd /repo/${SERVICE_PATH} && npm install --legacy-peer-deps && npm run build
 
-# Copy source and build
-COPY tsconfig.json ./
-COPY src/ src/
-RUN npm run build 2>/dev/null || npx tsc --project tsconfig.json
-
-# ─── Stage 3: Runtime ──────────────────────────────────────────────────────
+# ─── Stage 2: Runtime ───────────────────────────────────────────────────────
 FROM node:22-alpine
-
-# Create non-root user
+ARG SERVICE_PATH
 RUN addgroup -S app && adduser -S app -G app
-
 WORKDIR /app
 
-# Copy production deps from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+# Copy built service (dist + node_modules + package.json)
+COPY --from=builder /repo/${SERVICE_PATH}/dist ./dist
+COPY --from=builder /repo/${SERVICE_PATH}/node_modules ./node_modules
+COPY --from=builder /repo/${SERVICE_PATH}/package*.json ./
+# The linked lib lives under node_modules/@payment-api/platform-libs (symlink → copy target)
+COPY --from=builder /repo/libs/nodejs ./libs/nodejs
 
-# Copy built output from builder stage
-COPY --from=builder /app/dist ./dist
-
-# Copy package.json for metadata
-COPY package*.json ./
-
-# Fix permissions
 RUN chown -R app:app /app
 USER app
 
 ENV NODE_ENV=production
-ENV PORT=3000
-
-EXPOSE 3000
+EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
-  CMD wget -qO- http://localhost:3000/health || exit 1
+  CMD wget -qO- http://localhost:3001/liveness || exit 1
 
 CMD ["node", "dist/main.js"]

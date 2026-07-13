@@ -71,7 +71,7 @@ jobs:
       - name: Setup Go 1.22
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
 
       - name: Build Java libs
         run: cd libs/java && mvn install -DskipTests -B -q
@@ -84,6 +84,35 @@ jobs:
 
       - name: Build Node.js libs
         run: cd libs/nodejs && npm install && npm run build
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # VALIDATE EVENT SCHEMAS (Avro well-formedness — Phase-9)
+  # ═════════════════════════════════════════════════════════════════════════
+  schemas:
+    name: Validate Avro Schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install fastavro
+        run: pip install fastavro
+      - name: Validate all .avsc schemas
+        run: |
+          python - <<'PY'
+          import fastavro, json, glob, sys
+          bad = 0
+          for f in sorted(glob.glob("docs/cross-cutting/events/schemas/*.avsc")):
+              try:
+                  fastavro.parse_schema(json.load(open(f)))
+                  print("OK ", f)
+              except Exception as e:
+                  print("BAD", f, e); bad = 1
+          sys.exit(bad)
+          PY
+
 
   # ═════════════════════════════════════════════════════════════════════════
   # JAVA SERVICES
@@ -210,7 +239,7 @@ jobs:
       - name: Setup Go 1.22
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache-dependency-path: services/go/${{ matrix.service }}/go.sum
 
       - name: Lint (golangci-lint)

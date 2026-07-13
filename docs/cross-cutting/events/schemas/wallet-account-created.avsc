@@ -1,0 +1,70 @@
+{
+  "type": "record",
+  "name": "WalletAccountCreated",
+  "namespace": "com.paymentplatform.wallets",
+  "doc": "Wallet created. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "wallet.created"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "WalletAccountCreatedData",
+        "fields": [
+          {
+            "name": "account_id",
+            "type": "string"
+          },
+          {
+            "name": "customer_id",
+            "type": "string"
+          },
+          {
+            "name": "currency",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

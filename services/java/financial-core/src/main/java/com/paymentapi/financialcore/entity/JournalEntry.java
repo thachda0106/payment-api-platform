@@ -1,7 +1,6 @@
 package com.paymentapi.financialcore.entity;
 
 import jakarta.persistence.*;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -23,14 +22,14 @@ public class JournalEntry {
     @Column(nullable = false, length = 10)
     private String entryType;  // DEBIT or CREDIT
 
-    @Column(nullable = false, precision = 19, scale = 4)
-    private BigDecimal amount;
+    @Column(nullable = false)
+    private long amount;         // minor currency units (cents)
 
-    @Column(nullable = false, precision = 19, scale = 4)
-    private BigDecimal balanceBefore;
+    @Column(nullable = false)
+    private long balanceBefore;
 
-    @Column(nullable = false, precision = 19, scale = 4)
-    private BigDecimal balanceAfter;
+    @Column(nullable = false)
+    private long balanceAfter;
 
     @Column(length = 255)
     private String description;
@@ -47,12 +46,12 @@ public class JournalEntry {
     public void setAccountId(UUID v) { this.accountId = v; }
     public String getEntryType() { return entryType; }
     public void setEntryType(String v) { this.entryType = v; }
-    public BigDecimal getAmount() { return amount; }
-    public void setAmount(BigDecimal v) { this.amount = v; }
-    public BigDecimal getBalanceBefore() { return balanceBefore; }
-    public void setBalanceBefore(BigDecimal v) { this.balanceBefore = v; }
-    public BigDecimal getBalanceAfter() { return balanceAfter; }
-    public void setBalanceAfter(BigDecimal v) { this.balanceAfter = v; }
+    public long getAmount() { return amount; }
+    public void setAmount(long v) { this.amount = v; }
+    public long getBalanceBefore() { return balanceBefore; }
+    public void setBalanceBefore(long v) { this.balanceBefore = v; }
+    public long getBalanceAfter() { return balanceAfter; }
+    public void setBalanceAfter(long v) { this.balanceAfter = v; }
     public String getDescription() { return description; }
     public void setDescription(String v) { this.description = v; }
     public Instant getCreatedAt() { return createdAt; }

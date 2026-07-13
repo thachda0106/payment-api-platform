@@ -1,51 +1,37 @@
 # ============================================================================
-# Dockerfile.go — Go multi-stage build (scratch/minimal)
+# Dockerfile.go — Go multi-stage build (context: repo root)
 # ============================================================================
-# Build:  docker build -f docker/Dockerfile.go -t payment-api/{svc}:latest services/go/{svc}
-# Run:    docker run -p 8080:8080 payment-api/{svc}:latest
+# Usage:
+#   docker build -f docker/Dockerfile.go --build-arg SERVICE_PATH=services/go/settlement-service -t payment-api/settlement-service:latest .
+#   docker compose build settlement-service  (handled by docker-compose.yml)
+#
+# The repo layout is preserved inside the image so the module's
+# `replace github.com/payment-api/platform-libs => ../../../libs/go` resolves.
 # ============================================================================
 
 # ─── Stage 1: Build ────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
-
-# Install build dependencies
+FROM golang:1.25-alpine AS builder
+ARG SERVICE_PATH
 RUN apk add --no-cache git ca-certificates tzdata
+WORKDIR /repo
 
-WORKDIR /app
+# Shared platform lib (for the `replace` directive)
+COPY libs/go /repo/libs/go
 
-# Copy module files first for dependency caching
-COPY go.mod go.sum ./
+# Service module (path preserved so the replace directive resolves)
+COPY ${SERVICE_PATH} /repo/${SERVICE_PATH}
+WORKDIR /repo/${SERVICE_PATH}
 RUN go mod download
-
-# Copy source code
-COPY . .
-
-# Build static binary with optimizations
-# -ldflags="-s -w": strip debug info, reduce binary size
-# -trimpath: remove filesystem paths from binary
-# CGO_ENABLED=0: static linking, no libc dependency
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -trimpath \
-    -o /app/server \
-    ./cmd/server
+    go build -ldflags="-s -w" -trimpath -o /server ./cmd/server
 
-# ─── Stage 2: Runtime (distroless static) ──────────────────────────────────
-# Using scratch for minimal attack surface. Only ca-certificates for TLS.
+# ─── Stage 2: Runtime (scratch) ─────────────────────────────────────────────
 FROM scratch
-
-# Copy certificates for HTTPS outbound calls
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /server /server
 
-# Copy the static binary
-COPY --from=builder /app/server /server
-
-# Run as non-root (numeric user)
 USER 65534:65534
-
-EXPOSE 8080
-
-# No HEALTHCHECK in scratch (no shell). Use Kubernetes liveness/readiness probes instead.
-# For local dev, use `docker run --health-cmd` or rely on orchestrator probes.
+EXPOSE 8088
 
 ENTRYPOINT ["/server"]

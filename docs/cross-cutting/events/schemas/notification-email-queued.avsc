@@ -1,0 +1,38 @@
+{
+  "type": "record",
+  "name": "EmailQueued",
+  "namespace": "com.paymentplatform.notifications",
+  "doc": "Emitted when a payment receipt email is queued for delivery. BACKWARD compatibility.",
+  "fields": [
+    { "name": "id", "type": "string", "doc": "CloudEvents event ID (== outbox row id / dedup key)" },
+    { "name": "type", "type": "string", "doc": "Event type discriminator: email.queued" },
+    { "name": "time", "type": "string", "doc": "RFC 3339 timestamp" },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "EmailQueuedData",
+        "fields": [
+          { "name": "payment_id", "type": "string", "doc": "Payment this notification relates to (UUID)" },
+          { "name": "recipient_email", "type": "string", "doc": "Destination email address" },
+          { "name": "template", "type": "string", "default": "payment_receipt", "doc": "Notification template id" },
+          { "name": "amount", "type": ["null", "long"], "default": null, "doc": "Amount in minor currency unit (cents)" },
+          { "name": "currency", "type": ["null", "string"], "default": null, "doc": "ISO 4217 3-letter currency code" }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          { "name": "service", "type": "string", "doc": "Producing service name" },
+          { "name": "instance", "type": "string", "default": "", "doc": "Service instance identifier" },
+          { "name": "request_id", "type": "string", "default": "", "doc": "Originating API request ID" },
+          { "name": "idempotency_key", "type": "string", "default": "", "doc": "Idempotency key from the originating request" }
+        ]
+      }
+    }
+  ]
+}

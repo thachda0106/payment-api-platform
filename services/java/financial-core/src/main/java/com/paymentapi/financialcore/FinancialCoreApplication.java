@@ -17,7 +17,7 @@ import java.sql.Connection;
  * OTel Java Agent handles auto-instrumentation (HTTP, JPA, Kafka).
  */
 @SpringBootApplication(scanBasePackages = "com.paymentapi")
-@EnableScheduling  // For LedgerOutboxPoller
+@EnableScheduling  // For InboxRetryScheduler
 public class FinancialCoreApplication {
 
     public static void main(String[] args) {

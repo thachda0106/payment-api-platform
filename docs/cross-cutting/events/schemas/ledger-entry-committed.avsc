@@ -1,0 +1,40 @@
+{
+  "type": "record",
+  "name": "LedgerEntryCommitted",
+  "namespace": "com.paymentplatform.ledger",
+  "doc": "Emitted when a double-entry ledger transaction is posted for an approved payment. BACKWARD_TRANSITIVE compatibility.",
+  "fields": [
+    { "name": "id", "type": "string", "doc": "CloudEvents event ID (== outbox row id / dedup key)" },
+    { "name": "type", "type": "string", "doc": "Event type discriminator: ledger.entry.committed" },
+    { "name": "time", "type": "string", "doc": "RFC 3339 timestamp" },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "LedgerEntryCommittedData",
+        "fields": [
+          { "name": "payment_id", "type": "string", "doc": "Payment this ledger transaction settles (UUID)" },
+          { "name": "ledger_transaction_id", "type": "string", "doc": "Groups the journal entries (UUID)" },
+          { "name": "customer_id", "type": "string", "doc": "Payer external reference" },
+          { "name": "merchant_id", "type": "string", "doc": "Payee external reference" },
+          { "name": "amount", "type": "long", "doc": "Gross amount in minor currency unit (cents)" },
+          { "name": "fee", "type": "long", "default": 0, "doc": "Platform fee in minor currency unit (cents)" },
+          { "name": "currency", "type": "string", "doc": "ISO 4217 3-letter currency code" }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          { "name": "service", "type": "string", "doc": "Producing service name" },
+          { "name": "instance", "type": "string", "default": "", "doc": "Service instance identifier" },
+          { "name": "request_id", "type": "string", "default": "", "doc": "Originating API request ID" },
+          { "name": "idempotency_key", "type": "string", "default": "", "doc": "Idempotency key from the originating request" }
+        ]
+      }
+    }
+  ]
+}

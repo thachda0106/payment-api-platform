@@ -14,8 +14,6 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from fraud_service.config import FraudSettings, fraud_settings
-
 
 @dataclass
 class FraudResult:
@@ -28,8 +26,11 @@ class FraudResult:
 class FraudScorer:
     BLACKLISTED_MERCHANTS = {"fraud-merchant-1", "suspicious-merchant-99"}
 
-    def __init__(self, settings: Optional[FraudSettings] = None):
-        self._cfg = settings or fraud_settings
+    def __init__(self, settings: Optional[object] = None):
+        if settings is None:
+            from fraud_service.config import fraud_settings  # lazy import (avoids hard dep in tests)
+            settings = fraud_settings
+        self._cfg = settings
         # In-memory velocity tracker (per customer: list of timestamps).
         # Phase 7: in-memory. Phase 8: Redis-backed.
         self._velocity_tracker: Dict[str, List[float]] = {}

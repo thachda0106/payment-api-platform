@@ -1,0 +1,67 @@
+{
+  "type": "record",
+  "name": "WalletAccountFrozen",
+  "namespace": "com.paymentplatform.wallets",
+  "doc": "Wallet frozen. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "wallet.frozen"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "WalletAccountFrozenData",
+        "fields": [
+          {
+            "name": "account_id",
+            "type": "string"
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

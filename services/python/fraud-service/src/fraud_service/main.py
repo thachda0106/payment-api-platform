@@ -10,10 +10,10 @@ Consumes `payment-events`, scores, and publishes `fraud-events` via a transactio
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import asyncpg
-from aiokafka import AIOKafkaProducer
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
@@ -26,7 +26,7 @@ from payment_platform.health import (
     create_startup_router,
 )
 
-from fraud_service.consumer import FraudOutboxPoller, run_consumer
+from fraud_service.consumer import run_consumer, run_retry_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,6 @@ _runtime: dict = {}
 async def lifespan(app: FastAPI):
     tasks: list[asyncio.Task] = []
     pool = None
-    producer = None
-    poller = None
 
     if settings.database and settings.database.url:
         pool = await asyncpg.create_pool(
@@ -64,27 +62,25 @@ async def lifespan(app: FastAPI):
         _runtime["pool"] = pool
 
     if settings.kafka and settings.kafka.bootstrap_servers and pool is not None:
-        producer = AIOKafkaProducer(
-            bootstrap_servers=settings.kafka.bootstrap_servers,
-            acks="all",
-            enable_idempotence=True,
-        )
-        await producer.start()
-        poller = FraudOutboxPoller(pool, producer)
-        tasks.append(asyncio.create_task(poller.run(), name="fraud-outbox-poller"))
+        # Events are published via the Debezium CDC outbox (no app-side producer).
+        registry_url = os.getenv("SCHEMA_REGISTRY_URL", "http://schema-registry:8081")
         tasks.append(
             asyncio.create_task(
-                run_consumer(pool, settings.kafka.bootstrap_servers, _state),
+                run_consumer(pool, settings.kafka.bootstrap_servers, registry_url, _state),
                 name="fraud-consumer",
             )
         )
-        logger.info("fraud-service event pipeline started")
+        tasks.append(
+            asyncio.create_task(
+                run_retry_scheduler(pool, settings.kafka.bootstrap_servers),
+                name="fraud-inbox-retry",
+            )
+        )
+        logger.info("fraud-service consumer + retry scheduler started (Avro; events via CDC outbox)")
 
     try:
         yield
     finally:
-        if poller is not None:
-            poller.stop()
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -92,8 +88,6 @@ async def lifespan(app: FastAPI):
                 await task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 - shutdown best-effort
                 pass
-        if producer is not None:
-            await producer.stop()
         if pool is not None:
             await pool.close()
         _state["database"] = False

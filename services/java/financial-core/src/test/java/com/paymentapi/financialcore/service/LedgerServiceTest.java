@@ -10,7 +10,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,7 +34,7 @@ class LedgerServiceTest {
         Account a = new Account();
         a.setExternalRef(id);
         a.setAccountType(type);
-        a.setBalance(BigDecimal.ZERO);
+        a.setBalance(0L);
         return a;
     }
 
@@ -44,8 +43,7 @@ class LedgerServiceTest {
         UUID paymentId = UUID.randomUUID();
         when(journalEntryRepo.existsByPaymentId(paymentId)).thenReturn(true);
 
-        Optional<UUID> result = service.postPayment(
-            paymentId, "c1", "m1", new BigDecimal("100.00"));
+        Optional<UUID> result = service.postPayment(paymentId, "c1", "m1", 10000L);
 
         assertThat(result).isEmpty();
         verify(journalEntryRepo, never()).save(any());
@@ -67,11 +65,14 @@ class LedgerServiceTest {
         when(accountRepo.findByExternalRefAndAccountType("PLATFORM", Account.AccountType.PLATFORM_FEE_REVENUE))
             .thenReturn(Optional.of(platform));
 
-        Optional<UUID> result = service.postPayment(
-            paymentId, "c1", "m1", new BigDecimal("100.00"));
+        Optional<UUID> result = service.postPayment(paymentId, "c1", "m1", 10000L);
 
         assertThat(result).isPresent();
         verify(accountRepo, times(3)).save(any(Account.class));
         verify(journalEntryRepo, times(3)).save(any(JournalEntry.class));
+        // Double-entry balances to zero: -10000 (debit) + 9700 + 300 (credits) = 0
+        assertThat(customer.getBalance()).isEqualTo(-10000L);
+        assertThat(merchant.getBalance()).isEqualTo(9700L);
+        assertThat(platform.getBalance()).isEqualTo(300L);
     }
 }

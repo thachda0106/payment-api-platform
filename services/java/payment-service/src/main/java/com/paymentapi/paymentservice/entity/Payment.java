@@ -1,7 +1,6 @@
 package com.paymentapi.paymentservice.entity;
 
 import jakarta.persistence.*;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -14,8 +13,8 @@ public class Payment {
     @Column(unique = true, nullable = false, length = 64)
     private String idempotencyKey;
 
-    @Column(nullable = false, precision = 19, scale = 4)
-    private BigDecimal amount;
+    @Column(nullable = false)
+    private long amount;   // minor currency units (cents)
 
     @Column(nullable = false, length = 3)
     private String currency = "USD";
@@ -43,8 +42,8 @@ public class Payment {
     public void setId(UUID id) { this.id = id; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String v) { this.idempotencyKey = v; }
-    public BigDecimal getAmount() { return amount; }
-    public void setAmount(BigDecimal v) { this.amount = v; }
+    public long getAmount() { return amount; }
+    public void setAmount(long v) { this.amount = v; }
     public String getCurrency() { return currency; }
     public void setCurrency(String v) { this.currency = v; }
     public String getMerchantId() { return merchantId; }

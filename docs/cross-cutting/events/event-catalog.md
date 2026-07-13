@@ -7,6 +7,13 @@
 > **Audience**: All engineering teams
 > **Last Updated**: 2026-05-20
 
+> **⚠️ Implementation note (Phase-9 alignment, 2026-07-10):** The payment platform
+> preserves a **serial processing chain** `payment → fraud → ledger → notification`
+> (ledger posting depends on the fraud decision). The parallel "Risk Engine consumes
+> `payment.created`" model shown here runs **in addition to**, not instead of, that
+> serial chain. Dropping the serial order is a product/domain decision and is **not**
+> part of the current alignment. See `PLAN-phase9-alignment.md` (OQ-C).
+
 ---
 
 ## Topic Quick Reference

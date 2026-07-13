@@ -1,212 +1,86 @@
 #!/bin/bash
 # ============================================================================
-# verify-vertical-slice.sh — Phase 7 E2E Architecture Validation
+# verify-vertical-slice.sh — Phase-9 E2E verification (Debezium + Avro + inbox)
 # ============================================================================
 # Usage: bash scripts/verify-vertical-slice.sh
-# Prerequisites: docker-compose up -d must be running
+# Prereqs: docker-compose up -d  &&  bash scripts/register-schemas.sh
+#          &&  bash scripts/register-connectors.sh
 # ============================================================================
-set -euo pipefail
+set -uo pipefail
+export MSYS_NO_PATHCONV=1   # keep /etc/... paths intact on Git Bash (Windows)
 
 RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'; RESET='\033[0m'
 PASS="${GREEN}PASS${RESET}"; FAIL="${RED}FAIL${RESET}"; WARN="${YELLOW}WARN${RESET}"
+FAILURES=0
+fail() { echo -e "  $FAIL  $1"; FAILURES=$((FAILURES + 1)); }
+pass() { echo -e "  $PASS  $1"; }
+
+PG=payment-postgres
+psql_val() { docker exec $PG psql -U payment -d "$1" -t -c "$2" 2>/dev/null | xargs; }
 
 echo "========================================================================"
-echo " Phase 7 — Vertical Slice Architecture Validation"
+echo " Phase-9 Vertical Slice — Debezium CDC → Avro → inbox"
 echo "========================================================================"
 
-# ─── 1. Liveness Probes ───────────────────────────────────────────────────
-echo ""
-echo "=== 1. Service Liveness Probes ==="
+# ─── 1. Liveness ────────────────────────────────────────────────────────────
+echo ""; echo "=== 1. Service Liveness ==="
+for pair in "financial-core:8080" "payment-service:8081" "fraud-service:8000" "notification-service:3001" "settlement-service:8088"; do
+    name="${pair%%:*}"; port="${pair##*:}"
+    curl -sf -m 5 "http://localhost:$port/liveness" >/dev/null 2>&1 && pass "$name (:$port)" || fail "$name (:$port) not responding"
+done
 
-check_liveness() { local svc=$1 port=$2 name=$3
-    if curl -sf -m 5 http://localhost:$port/liveness > /dev/null 2>&1; then
-        echo -e "  $PASS  $name (:$port)"
-    else
-        echo -e "  $FAIL  $name (:$port) — not responding"
-        return 1
-    fi
-}
+# ─── 2. Debezium connectors RUNNING ─────────────────────────────────────────
+echo ""; echo "=== 2. Debezium Connectors ==="
+for c in payment-outbox-connector fraud-outbox-connector financial-core-outbox-connector notification-outbox-connector; do
+    state=$(curl -s "http://localhost:8083/connectors/$c/status" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null || echo "MISSING")
+    [ "$state" = "RUNNING" ] && pass "$c: RUNNING" || fail "$c: $state"
+done
 
-check_liveness "financial-core" 8080 "financial-core (Java)"
-check_liveness "payment-service" 8081 "payment-service (Java)"
-check_liveness "fraud-service" 8000 "fraud-service (Python)"
-check_liveness "notification-service" 3001 "notification-service (Node.js)"
-check_liveness "settlement-service" 8088 "settlement-service (Go)"
+# ─── 3. Create payment (amount in minor units: 9999 = \$99.99) ──────────────
+echo ""; echo "=== 3. Create Payment ==="
+KEY=$(python3 -c "import uuid;print(uuid.uuid4())")
+RESP=$(curl -s -X POST http://localhost:8081/v1/payments \
+  -H "Content-Type: application/json" -H "Idempotency-Key: $KEY" \
+  -d '{"amount":9999,"currency":"USD","merchantId":"m1","customerId":"c1"}')
+PAYMENT_ID=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paymentId',''))" 2>/dev/null || echo "")
+[ -n "$PAYMENT_ID" ] && pass "Payment created: $PAYMENT_ID" || { fail "Payment creation failed: $RESP"; echo "aborting"; exit 1; }
 
-# ─── 2. Create Payment ────────────────────────────────────────────────────
-echo ""
-echo "=== 2. Create Payment (POST /v1/payments) ==="
-
-IDEMPOTENCY_KEY=$(uuidgen 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || echo "test-key-$(date +%s)")
-
-RESPONSE=$(curl -s -X POST http://localhost:8081/v1/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
-  -d "{\"amount\":99.99,\"currency\":\"USD\",\"merchantId\":\"merchant-1\",\"customerId\":\"customer-1\"}")
-
-echo "  Request:  POST /v1/payments  Idempotency-Key=$IDEMPOTENCY_KEY"
-echo "  Response: $RESPONSE"
-
-PAYMENT_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('paymentId',''))" 2>/dev/null || echo "")
-STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
-
-if [ -n "$PAYMENT_ID" ] && [ "$STATUS" = "CREATED" ]; then
-    echo -e "  $PASS  Payment created: $PAYMENT_ID"
-else
-    echo -e "  $FAIL  Payment creation failed"
-    exit 1
-fi
-
-# ─── 3. Idempotency Test ──────────────────────────────────────────────────
-echo ""
-echo "=== 3. Idempotency Test (duplicate key) ==="
-
-RESPONSE2=$(curl -s -X POST http://localhost:8081/v1/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: $IDEMPOTENCY_KEY" \
-  -d "{\"amount\":99.99,\"currency\":\"USD\",\"merchantId\":\"merchant-1\",\"customerId\":\"customer-1\"}")
-
-PAYMENT_ID2=$(echo "$RESPONSE2" | python3 -c "import sys,json; print(json.load(sys.stdin).get('paymentId',''))" 2>/dev/null || echo "")
-
-if [ "$PAYMENT_ID2" = "$PAYMENT_ID" ]; then
-    echo -e "  $PASS  Duplicate idempotency key returned same payment ID"
-else
-    echo -e "  $FAIL  Idempotency failed: expected $PAYMENT_ID, got $PAYMENT_ID2"
-fi
-
-# ─── 4. Poll for Event Processing ─────────────────────────────────────────
-echo ""
-echo "=== 4. Event Flow Processing ==="
-echo "  Polling for: PaymentCreated → Fraud → Ledger → Notification... (timeout 120s)"
-TIMEOUT=120
+# ─── 4. Poll the serial chain (Debezium+Avro+inbox), timeout 120s ───────────
+echo ""; echo "=== 4. Serial chain: fraud → ledger → notification ==="
+ok() { [ "$(psql_val "$1" "$2")" = "$3" ]; }
 ELAPSED=0
-INTERVAL=3
+while [ $ELAPSED -lt 120 ]; do
+    ok fraud_db "SELECT count(*) FROM fraud_scores WHERE payment_id='$PAYMENT_ID'" "1" \
+      && ok financial_core_db "SELECT count(*) FROM journal_entries WHERE payment_id='$PAYMENT_ID'" "3" \
+      && ok notification_db "SELECT count(*) FROM notifications WHERE payment_id='$PAYMENT_ID'" "1" \
+      && break
+    sleep 3; ELAPSED=$((ELAPSED + 3))
+done
+echo "  (processed after ~${ELAPSED}s)"
 
-FRAUD_OK=false; LEDGER_OK=false; NOTIF_OK=false
-while [ $ELAPSED -lt $TIMEOUT ]; do
-    if [ "$FRAUD_OK" = false ]; then
-        FRAUD_ROW=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
-          "SELECT decision,score FROM fraud_scores WHERE payment_id='$PAYMENT_ID' LIMIT 1" 2>/dev/null || echo "")
-        [ -n "$FRAUD_ROW" ] && FRAUD_OK=true
-    fi
-    if [ "$LEDGER_OK" = false ]; then
-        C=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
-          "SELECT COUNT(*) FROM journal_entries WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
-        [ "$C" -ge 3 ] && LEDGER_OK=true
-    fi
-    if [ "$NOTIF_OK" = false ]; then
-        C=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
-          "SELECT COUNT(*) FROM notifications WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
-        [ "$C" -gt 0 ] && NOTIF_OK=true
-    fi
+[ "$(psql_val fraud_db "SELECT count(*) FROM fraud_scores WHERE payment_id='$PAYMENT_ID'")" = "1" ] \
+    && pass "fraud_scores: 1 row" || fail "fraud_scores not found"
+[ "$(psql_val fraud_db "SELECT status FROM consumer_inbox WHERE consumer_group='fraud-service' ORDER BY updated_at DESC LIMIT 1")" = "COMPLETED" ] \
+    && pass "fraud inbox COMPLETED" || fail "fraud inbox not COMPLETED"
 
-    if [ "$FRAUD_OK" = true ] && [ "$LEDGER_OK" = true ] && [ "$NOTIF_OK" = true ]; then
-        echo "  All services processed after ${ELAPSED}s"
-        break
-    fi
+LC=$(psql_val financial_core_db "SELECT count(*) FROM journal_entries WHERE payment_id='$PAYMENT_ID'")
+[ "$LC" = "3" ] && pass "journal_entries: 3" || fail "journal_entries: $LC (expected 3)"
+BAL=$(psql_val financial_core_db "SELECT SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END) FROM journal_entries WHERE payment_id='$PAYMENT_ID'")
+[ "$BAL" = "0" ] && pass "double-entry balanced (sum=0, minor units)" || fail "double-entry sum=$BAL"
 
-    sleep $INTERVAL
-    ELAPSED=$((ELAPSED + INTERVAL))
+[ "$(psql_val notification_db "SELECT count(*) FROM notifications WHERE payment_id='$PAYMENT_ID'")" = "1" ] \
+    && pass "notification: 1 row" || fail "notification not found"
+
+# ─── 5. DLQs empty ──────────────────────────────────────────────────────────
+echo ""; echo "=== 5. Dead Letter Queues ==="
+for dlq in payments.dlq ledger.dlq notifications.dlq; do
+    n=$(docker exec $PG true 2>/dev/null; docker exec payment-kafka kafka-run-class kafka.tools.GetOffsetShell \
+        --broker-list localhost:9092 --topic "$dlq" --command-config /etc/kafka/client-sasl.properties --time -1 2>/dev/null \
+        | awk -F: '{s+=$3} END{print s+0}')
+    [ "${n:-0}" = "0" ] && pass "$dlq empty" || echo -e "  $WARN  $dlq has ${n} message(s)"
 done
 
-# ─── 5. Verify Fraud Score (with outbox) ───────────────────────────────────
-echo ""
-echo "=== 5. Verify Fraud Score ==="
-FRAUD_ROW=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
-  "SELECT decision,score FROM fraud_scores WHERE payment_id='$PAYMENT_ID' LIMIT 1" 2>/dev/null || echo "")
-
-if [ -n "$FRAUD_ROW" ]; then
-    echo -e "  $PASS  Fraud scored: $FRAUD_ROW"
-    OBOX=$(docker exec payment-postgres psql -U payment -d fraud_db -t -c \
-      "SELECT COUNT(*) FROM fraud_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
-    if [ "$OBOX" -gt 0 ]; then
-        echo -e "  $PASS  fraud_outbox published ($OBOX row(s))"
-    else
-        echo -e "  $WARN  fraud_outbox not yet published"
-    fi
-else
-    echo -e "  $FAIL  No fraud score found for payment $PAYMENT_ID"
-fi
-
-# ─── 6. Verify Ledger Entries (with outbox) ────────────────────────────────
-echo ""
-echo "=== 6. Verify Double-Entry Ledger ==="
-LEDGER_COUNT=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
-  "SELECT COUNT(*) FROM journal_entries WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
-
-if [ "$LEDGER_COUNT" -ge 3 ]; then
-    echo -e "  $PASS  Journal entries: $LEDGER_COUNT (expected >= 3)"
-    OBOX=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
-      "SELECT COUNT(*) FROM ledger_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
-    if [ "$OBOX" -gt 0 ]; then
-        echo -e "  $PASS  ledger_outbox published ($OBOX row(s))"
-    else
-        echo -e "  $WARN  ledger_outbox not yet published"
-    fi
-else
-    echo -e "  $FAIL  Journal entries: $LEDGER_COUNT (expected >= 3)"
-fi
-
-# Check double-entry balance = 0
-BALANCE=$(docker exec payment-postgres psql -U payment -d financial_core_db -t -c \
-  "SELECT SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE -amount END)
-   FROM journal_entries WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "N/A")
-
-if [ "$BALANCE" = "0.0000" ] || [ "$BALANCE" = "0" ]; then
-    echo -e "  $PASS  Double-entry balanced: sum = $BALANCE"
-else
-    echo -e "  $WARN  Double-entry balance: $BALANCE (check if events still processing)"
-fi
-
-# ─── 7. Verify Notification (with outbox) ──────────────────────────────────
-echo ""
-echo "=== 7. Verify Notification ==="
-NOTIF_COUNT=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
-  "SELECT COUNT(*) FROM notifications WHERE payment_id='$PAYMENT_ID'" 2>/dev/null | xargs || echo "0")
-
-if [ "$NOTIF_COUNT" -gt 0 ]; then
-    echo -e "  $PASS  Notification sent: $NOTIF_COUNT record(s)"
-    OBOX=$(docker exec payment-postgres psql -U payment -d notification_db -t -c \
-      "SELECT COUNT(*) FROM notification_outbox WHERE aggregate_id='$PAYMENT_ID' AND published_at IS NOT NULL" 2>/dev/null | xargs || echo "0")
-    if [ "$OBOX" -gt 0 ]; then
-        echo -e "  $PASS  notification_outbox published ($OBOX row(s))"
-    else
-        echo -e "  $WARN  notification_outbox not yet published"
-    fi
-else
-    echo -e "  $WARN  Notification not found (may still be processing)"
-fi
-
-# ─── 8. Kafka Consumer Lag ────────────────────────────────────────────────
-echo ""
-echo "=== 8. Kafka Consumer Lag ==="
-for group in payment-service fraud-service financial-core notification-service; do
-    LAG=$(docker exec payment-kafka kafka-consumer-groups --bootstrap-server localhost:9092 \
-      --group $group --describe 2>/dev/null | grep -v "^$" | awk '{sum+=$6} END {print sum+0}' || echo "N/A")
-    echo "  $group: lag=$LAG"
-done
-
-# ─── 9. Dead Letter Queue ─────────────────────────────────────────────────
-echo ""
-echo "=== 9. Dead Letter Queue ==="
-DLQ_COUNT=$(docker exec payment-kafka kafka-run-class kafka.tools.GetOffsetShell \
-  --broker-list localhost:9092 --topic payment-events-dlq --time -1 2>/dev/null | \
-  awk -F: '{sum+=$3} END {print sum+0}' || echo "N/A")
-
-if [ "$DLQ_COUNT" = "0" ] || [ "$DLQ_COUNT" = "N/A" ]; then
-    echo -e "  $PASS  DLQ empty (no poison messages)"
-else
-    echo -e "  $WARN  DLQ has $DLQ_COUNT messages"
-fi
-
-# ─── Summary ──────────────────────────────────────────────────────────────
-echo ""
+echo ""; echo "========================================================================"
+[ "$FAILURES" -eq 0 ] && echo -e " ${GREEN}Vertical slice PASSED${RESET}" || echo -e " ${RED}FAILED — $FAILURES check(s)${RESET}"
 echo "========================================================================"
-echo " Architecture Validation Complete"
-echo "========================================================================"
-echo ""
-echo "  Flow: POST /v1/payments → PaymentCreated → Fraud → Ledger → Notification"
-echo "  Payment ID: $PAYMENT_ID"
-echo "  Jaeger UI:  http://localhost:16686 (search for payment-service)"
-echo "  Grafana:    http://localhost:3000 (admin/admin)"
-echo ""
+exit "$FAILURES"

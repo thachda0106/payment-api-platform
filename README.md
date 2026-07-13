@@ -42,20 +42,24 @@ cd payment-api-platform
 # 2. Start everything (12 infra + 5 services)
 docker-compose up -d
 
-# 3. Verify
+# 3. Register Avro schemas + Debezium connectors (Phase-9 CDC pipeline)
+bash scripts/register-schemas.sh
+bash scripts/register-connectors.sh
+
+# 4. Verify
 curl http://localhost:8081/liveness  # payment-service (Java)
 curl http://localhost:8000/liveness  # fraud-service (Python)
 curl http://localhost:3001/liveness  # notification-service (Node.js)
 curl http://localhost:8080/liveness  # financial-core (Java)
 curl http://localhost:8088/liveness  # settlement-service (Go)
 
-# 4. Create a payment
+# 5. Create a payment (amount in minor units — 9999 = $99.99)
 curl -X POST http://localhost:8081/v1/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"amount":99.99,"currency":"USD","merchantId":"m1","customerId":"c1"}'
+  -d '{"amount":9999,"currency":"USD","merchantId":"m1","customerId":"c1"}'
 
-# 5. Run E2E verification
+# 6. Run E2E verification
 bash scripts/verify-vertical-slice.sh
 ```
 
@@ -86,16 +90,17 @@ bash scripts/verify-vertical-slice.sh
 
 | Pattern | Implementation |
 |---------|---------------|
-| **Transactional Outbox** | `payments` + `payment_outbox` in same `@Transactional` |
-| **SKIP LOCKED** | `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100` — multi-instance safe |
-| **Idempotency (API)** | `UNIQUE(idempotency_key)` → duplicate returns cached 200 |
-| **Idempotency (Consumer)** | `INSERT ... ON CONFLICT (event_id, consumer_group) DO NOTHING` |
-| **eventId ≠ paymentId** | Dedup uses `eventId`; ordering uses `aggregateId` (paymentId) |
+| **Transactional Outbox (CDC)** | Producers write a CloudEvents envelope to an `outbox` table in the same TX as state; **Debezium** tails the WAL and publishes to Kafka |
+| **Avro + Schema Registry** | Events are Avro-encoded (Confluent Schema Registry); `docs/cross-cutting/events/schemas/*.avsc` are the design reference |
+| **CloudEvents envelope** | `{ id, type, time, data{…}, trigger{…} }` on every event |
+| **Idempotency (API)** | `UNIQUE(idempotency_key)` → concurrent duplicate returns cached payment (no 500) |
+| **Inbox Pattern** | Consumers dedup + retry via `consumer_inbox` (status/retry_count); commit offset on claim, reprocess FAILED via a retry scheduler |
+| **Retry + Backoff → DLQ** | Failed events retried ≤5× with exponential backoff, then routed to `<domain>.dlq` |
+| **Serial chain (preserved)** | `payment → fraud → ledger → notification` (ledger depends on the fraud decision) |
 | **Double-Entry Ledger** | 3 journal entries per payment, `SUM(CREDIT) - SUM(DEBIT) = 0` |
-| **balance = Projection** | `accounts.balance` is cached; `journal_entries` is source of truth |
-| **Dead Letter Queue** | Failed events → `payment-events-dlq` after retries |
-| **Distributed Tracing** | W3C traceparent via Kafka headers → Jaeger |
-| **Cached Readiness** | TTL 5s dependency registry — no I/O storms on probes |
+| **Minor-unit amounts** | All amounts are `long` cents (no floating point) |
+| **Kafka + Registry auth** | SASL_PLAINTEXT/PLAIN + Schema Registry HTTP BASIC (dev-only creds) |
+| **eventId ≠ paymentId** | `id` (CloudEvents) dedups; `paymentId` (partition key) orders |
 
 ---
 

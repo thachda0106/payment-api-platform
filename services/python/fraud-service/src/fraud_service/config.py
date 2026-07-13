@@ -13,7 +13,7 @@ class FraudSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="FRAUD_", case_sensitive=False)
 
-    high_value_threshold: float = 1000.0     # amount above this → REVIEW
+    high_value_threshold: float = 100000.0    # amount (minor units / cents) above this → REVIEW  (= $1000.00)
     velocity_threshold: int = 3               # max transactions per window → REJECTED
     velocity_window_seconds: int = 60         # velocity sliding window
     velocity_sweep_every: int = 1000          # prune stale customers every N scores

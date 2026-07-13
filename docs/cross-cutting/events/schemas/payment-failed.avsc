@@ -1,0 +1,42 @@
+{
+  "type": "record",
+  "name": "PaymentFailed",
+  "namespace": "com.paymentplatform.payments",
+  "doc": "Emitted when fraud rejects a payment (serial chain — no ledger posting). BACKWARD compatibility.",
+  "fields": [
+    { "name": "id", "type": "string", "doc": "CloudEvents event ID (== outbox row id / dedup key)" },
+    { "name": "type", "type": "string", "doc": "Event type discriminator: payment.failed" },
+    { "name": "time", "type": "string", "doc": "RFC 3339 timestamp" },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "PaymentFailedData",
+        "fields": [
+          { "name": "payment_id", "type": "string", "doc": "Unique payment identifier (UUID)" },
+          { "name": "customer_id", "type": "string", "doc": "Payer external reference" },
+          { "name": "merchant_id", "type": "string", "doc": "Payee external reference" },
+          { "name": "amount", "type": "long", "doc": "Payment amount in minor currency unit (cents)" },
+          { "name": "currency", "type": "string", "doc": "ISO 4217 3-letter currency code" },
+          { "name": "fraud_score", "type": ["null", "double"], "default": null, "doc": "Fraud score assigned during review" },
+          { "name": "fraud_decision", "type": "string", "default": "REJECTED", "doc": "Fraud decision (REJECTED or REVIEW)" },
+          { "name": "reason", "type": "string", "default": "", "doc": "Human-readable rejection reason" },
+          { "name": "metadata", "type": { "type": "map", "values": "string" }, "default": {}, "doc": "User-defined key-value pairs" }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          { "name": "service", "type": "string", "doc": "Producing service name" },
+          { "name": "instance", "type": "string", "default": "", "doc": "Service instance identifier" },
+          { "name": "request_id", "type": "string", "default": "", "doc": "Originating API request ID" },
+          { "name": "idempotency_key", "type": "string", "default": "", "doc": "Idempotency key from the originating request" }
+        ]
+      }
+    }
+  ]
+}

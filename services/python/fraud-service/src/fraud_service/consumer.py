@@ -1,199 +1,260 @@
 """
-Kafka consumer + transactional outbox for fraud-service.
+Kafka consumer (Avro) + inbox pattern for fraud-service (Phase-9 P2).
 
-Consumes PaymentCreated events from `payment-events`, scores them, and writes the
-result to `fraud_scores` AND a `fraud_outbox` row in a SINGLE database transaction
-(atomic idempotency + no dual-write). A poller drains `fraud_outbox` to the
-`fraud-events` topic (at-least-once; consumers dedup via processed_events).
+Consumes `payments.payment.created` (Avro/CloudEvents), scores the payment, and
+writes the fraud result to the CDC `outbox` (payments.payment.succeeded/failed).
+Uses the inbox pattern:
+  1. decode + normalize the event → claim inbox (PENDING); commit Kafka offset
+  2. process (score + outbox insert + mark COMPLETED) in one transaction
+  3. on failure mark FAILED; InboxRetryScheduler retries with backoff → DLQ
 """
 
 import asyncio
 import json
+import os
 import uuid
 import logging
 from datetime import datetime, timezone
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
-from fraud_service.events import EventValidationError, validate_payment_event
+from fraud_service.avro_registry import AvroRegistryDecoder
 from fraud_service.scorer import FraudScorer
 
 logger = logging.getLogger(__name__)
 
-SOURCE_TOPIC = "payment-events"
-OUTBOX_TOPIC = "fraud-events"
-DLQ_TOPIC = "payment-events-dlq"
+SOURCE_TOPIC = "payments.payment.created"
+DLQ_TOPIC = "payments.dlq"
 CONSUMER_GROUP = "fraud-service"
-POLL_INTERVAL_SECONDS = 1.0
-POLL_BATCH_SIZE = 100
+MAX_RETRIES = 5
+RETRY_INTERVAL_SECONDS = 5
+CURRENCY_RE = __import__("re").compile(r"^[A-Z]{3}$")
 
 
-class FraudConsumer:
-    """Scores a payment and persists score + outbox row in one transaction."""
+def _kafka_security() -> dict:
+    """SASL kwargs for aiokafka from env (Phase-9 P4). Default PLAINTEXT (no auth)."""
+    proto = os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT")
+    kw: dict = {"security_protocol": proto}
+    if proto.startswith("SASL"):
+        kw["sasl_mechanism"] = os.getenv("KAFKA_SASL_MECHANISM", "PLAIN")
+        kw["sasl_plain_username"] = os.getenv("KAFKA_SASL_USERNAME", "")
+        kw["sasl_plain_password"] = os.getenv("KAFKA_SASL_PASSWORD", "")
+    return kw
+
+
+def _registry_auth() -> tuple[str, str] | None:
+    user = os.getenv("SR_BASIC_AUTH_USER", "")
+    return (user, os.getenv("SR_BASIC_AUTH_PASS", "")) if user else None
+
+
+def _normalize(event: dict) -> dict:
+    """Flatten Avro/CloudEvents → inbox payload; raises ValueError if invalid."""
+    data = event.get("data") or {}
+    n = {
+        "eventId": event.get("id"),
+        "paymentId": data.get("payment_id"),
+        "customerId": data.get("customer_id"),
+        "merchantId": data.get("merchant_id"),
+        "amountMinor": data.get("amount"),
+        "currency": data.get("currency"),
+    }
+    if not n["eventId"]:
+        raise ValueError("missing id")
+    uuid.UUID(str(n["paymentId"]))  # raises if not a UUID / missing
+    if not n["customerId"] or not n["merchantId"]:
+        raise ValueError("missing customer_id/merchant_id")
+    if not n["currency"] or not CURRENCY_RE.match(str(n["currency"])):
+        raise ValueError("currency not ISO 4217")
+    if n["amountMinor"] is None or int(n["amountMinor"]) <= 0:
+        raise ValueError("amount must be > 0")
+    return n
+
+
+class FraudProcessor:
+    """Scores + writes outbox + marks inbox COMPLETED in one transaction."""
 
     def __init__(self, db_pool):
         self.db = db_pool
         self.scorer = FraudScorer()
 
-    async def handle(self, event: dict) -> None:
-        """Process one PaymentCreated event. Validation errors propagate to the caller."""
-        validate_payment_event(event)
+    async def process(self, payload_json: str) -> None:
+        p = json.loads(payload_json)
+        payment_id = p["paymentId"]
+        amount_minor = int(p["amountMinor"])
 
-        event_id = event["eventId"]
-        payment_id = event["paymentId"]
+        scoring_input = {
+            "paymentId": payment_id,
+            "amount": amount_minor,  # minor units (cents) — thresholds are in minor units
+            "customerId": p["customerId"],
+            "merchantId": p["merchantId"],
+        }
+        result = self.scorer.score(scoring_input)
+
+        approved = result.decision == "APPROVED"
+        out_id = str(uuid.uuid4())
+        event_type = "payment.succeeded" if approved else "payment.failed"
+        event_topic = "payments.payment.succeeded" if approved else "payments.payment.failed"
+        data = {
+            "payment_id": payment_id,
+            "customer_id": p["customerId"],
+            "merchant_id": p["merchantId"],
+            "amount": amount_minor,
+            "currency": p["currency"],
+            "fraud_score": result.score,
+            "fraud_decision": result.decision,
+        }
+        if not approved:
+            data["reason"] = result.reason
+        envelope = {
+            "id": out_id, "type": event_type,
+            "time": datetime.now(timezone.utc).isoformat(),
+            "data": data,
+            "trigger": {"service": "fraud-service", "instance": "", "request_id": "", "idempotency_key": ""},
+        }
 
         async with self.db.acquire() as conn:
             async with conn.transaction():
-                # Atomic idempotency — dedup mark shares the transaction with the writes.
-                marked = await conn.fetchval(
-                    """INSERT INTO processed_events (event_id, consumer_group, processed_at)
-                       VALUES ($1, $2, now())
-                       ON CONFLICT (event_id, consumer_group) DO NOTHING
-                       RETURNING event_id""",
-                    event_id, CONSUMER_GROUP,
-                )
-                if marked is None:
-                    logger.info("Duplicate event %s — skipping", event_id)
-                    return
-
-                result = self.scorer.score(event)
-                logger.info(
-                    "Fraud check: payment=%s score=%s decision=%s",
-                    payment_id, result.score, result.decision,
-                )
-
                 await conn.execute(
                     """INSERT INTO fraud_scores (id, payment_id, score, decision, reason)
                        VALUES ($1, $2, $3, $4, $5)""",
                     str(uuid.uuid4()), payment_id, result.score, result.decision, result.reason,
                 )
-
-                event_type = "PaymentApproved" if result.decision == "APPROVED" else "PaymentRejected"
-                out_event_id = str(uuid.uuid4())
-                payload = {
-                    "v": 1,
-                    "eventId": out_event_id,
-                    "type": event_type,
-                    "paymentId": payment_id,
-                    "amount": str(event["amount"]),
-                    "currency": event["currency"],
-                    "customerId": event["customerId"],
-                    "merchantId": event["merchantId"],
-                    "score": result.score,
-                    "decision": result.decision,
-                    "reason": result.reason,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
                 await conn.execute(
-                    """INSERT INTO fraud_outbox (event_id, aggregate_id, event_type, payload)
-                       VALUES ($1, $2, $3, $4::jsonb)""",
-                    out_event_id, payment_id, event_type, json.dumps(payload),
-                )
-
-
-class FraudOutboxPoller:
-    """Drains unpublished fraud_outbox rows to Kafka and stamps published_at."""
-
-    def __init__(self, db_pool, producer: AIOKafkaProducer):
-        self.db = db_pool
-        self.producer = producer
-        self._running = False
-
-    async def run(self) -> None:
-        self._running = True
-        while self._running:
-            try:
-                await self._publish_batch()
-            except Exception:  # pragma: no cover - defensive loop guard
-                logger.exception("fraud outbox poll failed")
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
-
-    def stop(self) -> None:
-        self._running = False
-
-    async def backlog(self) -> int:
-        async with self.db.acquire() as conn:
-            return await conn.fetchval(
-                "SELECT count(*) FROM fraud_outbox WHERE published_at IS NULL"
-            )
-
-    async def _publish_batch(self) -> None:
-        async with self.db.acquire() as conn:
-            rows = await conn.fetch(
-                """SELECT id, aggregate_id, payload
-                   FROM fraud_outbox
-                   WHERE published_at IS NULL
-                   ORDER BY created_at, id
-                   FOR UPDATE SKIP LOCKED
-                   LIMIT $1""",
-                POLL_BATCH_SIZE,
-            )
-            for row in rows:
-                await self.producer.send_and_wait(
-                    OUTBOX_TOPIC,
-                    key=str(row["aggregate_id"]).encode(),
-                    value=row["payload"].encode() if isinstance(row["payload"], str)
-                    else json.dumps(row["payload"]).encode(),
+                    """INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type,
+                                           event_topic, payload, partition_key)
+                       VALUES ($1, 'payment', $2, $3, $4, $5::jsonb, $2)""",
+                    out_id, payment_id, event_type, event_topic, json.dumps(envelope),
                 )
                 await conn.execute(
-                    "UPDATE fraud_outbox SET published_at = now() WHERE id = $1", row["id"]
+                    """UPDATE consumer_inbox SET status='COMPLETED', updated_at=now()
+                       WHERE event_id=$1::uuid AND consumer_group=$2""",
+                    p["eventId"], CONSUMER_GROUP,
                 )
-            if rows:
-                logger.debug("Published %d fraud-events", len(rows))
+        logger.info("Fraud scored payment=%s decision=%s", payment_id, result.decision)
 
 
-async def run_consumer(db_pool, bootstrap_servers: str, state: dict) -> None:
-    """Consume payment-events and score them. Routes poison messages to the DLQ."""
+async def _claim(pool, event_id: str, payload_json: str) -> str:
+    """INSERT PENDING (idempotent) and return current status."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO consumer_inbox (event_id, consumer_group, status, payload)
+               VALUES ($1::uuid, $2, 'PENDING', $3::jsonb)
+               ON CONFLICT (event_id, consumer_group) DO NOTHING""",
+            event_id, CONSUMER_GROUP, payload_json,
+        )
+        return await conn.fetchval(
+            "SELECT status FROM consumer_inbox WHERE event_id=$1::uuid AND consumer_group=$2",
+            event_id, CONSUMER_GROUP,
+        )
+
+
+async def _mark_failed(pool, event_id: str, error: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE consumer_inbox SET status='FAILED', last_error=$1, updated_at=now()
+               WHERE event_id=$2::uuid AND consumer_group=$3""",
+            error[:1000], event_id, CONSUMER_GROUP,
+        )
+
+
+async def run_consumer(db_pool, bootstrap_servers: str, registry_url: str, state: dict) -> None:
     consumer = AIOKafkaConsumer(
-        SOURCE_TOPIC,
-        bootstrap_servers=bootstrap_servers,
-        group_id=CONSUMER_GROUP,
-        enable_auto_commit=False,
-        auto_offset_reset="earliest",
+        SOURCE_TOPIC, bootstrap_servers=bootstrap_servers, group_id=CONSUMER_GROUP,
+        enable_auto_commit=False, auto_offset_reset="earliest", **_kafka_security(),
     )
-    dlq_producer = AIOKafkaProducer(
-        bootstrap_servers=bootstrap_servers,
-        acks="all",
-        enable_idempotence=True,
-    )
-    fraud = FraudConsumer(db_pool)
+    dlq_producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all",
+                                    enable_idempotence=True, **_kafka_security())
+    decoder = AvroRegistryDecoder(registry_url, auth=_registry_auth())
+    processor = FraudProcessor(db_pool)
     await consumer.start()
     await dlq_producer.start()
     state["kafka"] = True
-    logger.info("fraud consumer started on topic %s", SOURCE_TOPIC)
+    logger.info("fraud consumer started on topic %s (Avro)", SOURCE_TOPIC)
     try:
         async for msg in consumer:
             try:
-                event = json.loads(msg.value)
-                await fraud.handle(event)
+                event = await decoder.decode(msg.value)
+                normalized = _normalize(event)
+                payload_json = json.dumps(normalized)
+            except Exception as exc:  # decode/validation → non-retryable → DLQ
+                logger.error("Invalid event → DLQ: %s", exc)
+                await _to_dlq(dlq_producer, msg.key, msg.value, exc)
                 await consumer.commit()
-            except EventValidationError as exc:
-                logger.error("Invalid event, routing to DLQ: %s", exc)
-                await _send_to_dlq(dlq_producer, msg.key, msg.value, exc, "fraud-service")
+                continue
+
+            event_id = normalized["eventId"]
+            status = await _claim(db_pool, event_id, payload_json)
+            if status == "COMPLETED":
                 await consumer.commit()
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                logger.error("Unparseable event, routing to DLQ: %s", exc)
-                await _send_to_dlq(dlq_producer, msg.key, msg.value, exc, "fraud-service")
-                await consumer.commit()
+                continue
+            try:
+                await processor.process(payload_json)
             except Exception:
-                logger.exception("Failed to process payment event")
+                logger.exception("Processing failed for %s (will retry)", event_id)
+                await _mark_failed(db_pool, event_id, "processing error")
+            await consumer.commit()
     finally:
         state["kafka"] = False
         await consumer.stop()
         await dlq_producer.stop()
 
 
-async def _send_to_dlq(producer: AIOKafkaProducer, key, raw_value,
-                        error, consumer_group: str) -> None:
-    dlq_payload = json.dumps({
-        "error": str(error),
-        "consumer": consumer_group,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+async def run_retry_scheduler(db_pool, bootstrap_servers: str) -> None:
+    """Retry FAILED inbox rows with exponential backoff; route exhausted to DLQ."""
+    producer = AIOKafkaProducer(bootstrap_servers=bootstrap_servers, acks="all",
+                                enable_idempotence=True, **_kafka_security())
+    processor = FraudProcessor(db_pool)
+    await producer.start()
+    try:
+        while True:
+            await asyncio.sleep(RETRY_INTERVAL_SECONDS)
+            try:
+                await _retry_batch(db_pool, processor, producer)
+            except Exception:
+                logger.exception("retry scheduler tick failed")
+    finally:
+        await producer.stop()
+
+
+async def _retry_batch(pool, processor: "FraudProcessor", producer: AIOKafkaProducer) -> None:
+    async with pool.acquire() as conn:
+        due = await conn.fetch(
+            """SELECT event_id::text AS id, payload::text AS payload FROM consumer_inbox
+               WHERE consumer_group=$1 AND status='FAILED' AND retry_count < $2
+                 AND updated_at < now() - (power(2, retry_count) * interval '1 second')
+               ORDER BY updated_at LIMIT 50""",
+            CONSUMER_GROUP, MAX_RETRIES,
+        )
+        exhausted = await conn.fetch(
+            """SELECT event_id::text AS id, payload::text AS payload FROM consumer_inbox
+               WHERE consumer_group=$1 AND status='FAILED' AND retry_count >= $2
+               ORDER BY updated_at LIMIT 50""",
+            CONSUMER_GROUP, MAX_RETRIES,
+        )
+    for row in due:
+        try:
+            await processor.process(row["payload"])
+        except Exception as exc:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE consumer_inbox SET retry_count=retry_count+1, last_error=$1, updated_at=now()
+                       WHERE event_id=$2::uuid AND consumer_group=$3""",
+                    str(exc)[:1000], row["id"], CONSUMER_GROUP,
+                )
+    for row in exhausted:
+        await producer.send_and_wait(DLQ_TOPIC, value=row["payload"].encode())
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE consumer_inbox SET status='DLQ', updated_at=now() WHERE event_id=$1::uuid AND consumer_group=$2",
+                row["id"], CONSUMER_GROUP,
+            )
+        logger.error("Event %s exhausted retries — routed to %s", row["id"], DLQ_TOPIC)
+
+
+async def _to_dlq(producer: AIOKafkaProducer, key, raw_value, error) -> None:
+    raw = raw_value.hex() if isinstance(raw_value, bytes) else str(raw_value)
+    wrapper = json.dumps({
+        "error": str(error), "consumer": CONSUMER_GROUP,
+        "timestamp": datetime.now(timezone.utc).isoformat(), "original_hex": raw,
     })
-    raw_str = raw_value.decode("utf-8", errors="replace") if isinstance(raw_value, bytes) else str(raw_value)
-    wrapper = json.dumps({"original": raw_str, "dlq_meta": dlq_payload})
-    await producer.send_and_wait(
-        DLQ_TOPIC,
-        key=key,
-        value=wrapper.encode(),
-    )
+    await producer.send_and_wait(DLQ_TOPIC, key=key, value=wrapper.encode())

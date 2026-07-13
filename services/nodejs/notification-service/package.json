@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@payment-api/platform-libs": "file:../../../libs/nodejs",
+    "@kafkajs/confluent-schema-registry": "^3.3.0",
     "fastify": "^5.0.0",
     "@fastify/cors": "^10.0.0",
     "kafkajs": "^2.2.4",

@@ -1,0 +1,80 @@
+{
+  "type": "record",
+  "name": "RefundFailed",
+  "namespace": "com.paymentplatform.refunds",
+  "doc": "Refund failed. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "refund.failed"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "RefundFailedData",
+        "fields": [
+          {
+            "name": "refund_id",
+            "type": "string"
+          },
+          {
+            "name": "payment_id",
+            "type": "string"
+          },
+          {
+            "name": "amount",
+            "type": "long",
+            "doc": "minor units"
+          },
+          {
+            "name": "currency",
+            "type": "string"
+          },
+          {
+            "name": "reason",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

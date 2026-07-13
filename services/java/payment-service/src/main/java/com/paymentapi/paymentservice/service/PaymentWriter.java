@@ -10,17 +10,21 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Transactional writer: persists the payment and its outbox event atomically.
- * Kept separate from {@link PaymentService} so the idempotency retry (catch +
- * re-read) runs OUTSIDE this transaction — a unique-key violation dooms the
- * current transaction, so the cached read must happen in a fresh one.
+ * Transactional writer: persists the payment and a CDC outbox row atomically.
+ * The outbox row carries a CloudEvents envelope (JSON) that a Debezium connector
+ * publishes to `payments.payment.created` as Avro.
  */
 @Component
 public class PaymentWriter {
+    private static final String AGGREGATE_TYPE = "payment";
+    private static final String EVENT_TYPE = "payment.created";
+    private static final String EVENT_TOPIC = "payments.payment.created";
+
     private final PaymentRepository paymentRepo;
     private final OutboxRepository outboxRepo;
     private final ObjectMapper mapper;
@@ -40,37 +44,52 @@ public class PaymentWriter {
         payment.setMerchantId(req.merchantId());
         payment.setCustomerId(req.customerId());
         payment.setStatus("CREATED");
-        // Force the INSERT (and thus the unique-key check) to happen now, inside
-        // this transaction, so a duplicate surfaces as DataIntegrityViolationException.
         payment = paymentRepo.saveAndFlush(payment);
 
-        OutboxEvent event = new OutboxEvent();
-        UUID eventId = UUID.randomUUID();
-        event.setEventId(eventId);
-        event.setAggregateId(payment.getId());
-        event.setEventType("PaymentCreated");
-        event.setPayload(toPayload(eventId, payment));
-        event.setTraceId(traceId);
-        outboxRepo.save(event);
-
+        outboxRepo.save(buildOutbox(payment, traceId));
         return payment;
     }
 
-    private String toPayload(UUID eventId, Payment p) {
+    private OutboxEvent buildOutbox(Payment p, String traceId) {
+        UUID eventId = UUID.randomUUID();
+        String paymentId = p.getId().toString();
+
+        OutboxEvent event = new OutboxEvent();
+        event.setId(eventId);
+        event.setAggregateType(AGGREGATE_TYPE);
+        event.setAggregateId(paymentId);
+        event.setEventType(EVENT_TYPE);
+        event.setEventTopic(EVENT_TOPIC);
+        event.setPartitionKey(paymentId);
+        event.setPayload(cloudEvent(eventId, paymentId, p, traceId));
+        return event;
+    }
+
+    /** CloudEvents envelope: { id, type, time, data{...}, trigger{...} }. Amount in minor units. */
+    private String cloudEvent(UUID eventId, String paymentId, Payment p, String traceId) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("payment_id", paymentId);
+        data.put("customer_id", p.getCustomerId());
+        data.put("merchant_id", p.getMerchantId());
+        data.put("amount", p.getAmount());   // already minor units
+        data.put("currency", p.getCurrency());
+
+        Map<String, Object> trigger = new LinkedHashMap<>();
+        trigger.put("service", "payment-service");
+        trigger.put("instance", "");
+        trigger.put("request_id", traceId == null ? "" : traceId);
+        trigger.put("idempotency_key", p.getIdempotencyKey());
+
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("id", eventId.toString());
+        envelope.put("type", EVENT_TYPE);
+        envelope.put("time", Instant.now().toString());
+        envelope.put("data", data);
+        envelope.put("trigger", trigger);
         try {
-            return mapper.writeValueAsString(Map.of(
-                "v", 1,
-                "eventId", eventId.toString(),
-                "type", "PaymentCreated",
-                "paymentId", p.getId().toString(),
-                "amount", p.getAmount(),
-                "currency", p.getCurrency(),
-                "merchantId", p.getMerchantId(),
-                "customerId", p.getCustomerId(),
-                "timestamp", Instant.now().toString()
-            ));
+            return mapper.writeValueAsString(envelope);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize event payload", e);
+            throw new RuntimeException("Failed to serialize CloudEvents payload", e);
         }
     }
 }

@@ -1,0 +1,74 @@
+{
+  "type": "record",
+  "name": "WebhookDelivered",
+  "namespace": "com.paymentplatform.notifications",
+  "doc": "Webhook delivery result. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "webhook.delivered"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "WebhookDeliveredData",
+        "fields": [
+          {
+            "name": "webhook_id",
+            "type": "string"
+          },
+          {
+            "name": "merchant_id",
+            "type": "string"
+          },
+          {
+            "name": "event_type",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

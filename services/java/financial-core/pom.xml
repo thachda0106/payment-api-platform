@@ -21,6 +21,13 @@
         <java.version>21</java.version>
     </properties>
 
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <!-- Platform shared library -->
         <dependency>
@@ -49,6 +56,13 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- Avro + Confluent Schema Registry (Phase-9 P2 consumer deserialization) -->
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>7.6.0</version>
         </dependency>
 
         <!-- Database -->

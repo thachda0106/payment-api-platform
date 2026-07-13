@@ -7,6 +7,13 @@
 > **Audience**: All engineering teams
 > **Last Updated**: 2026-05-20
 
+> **⚠️ Implementation note (Phase-9 alignment, 2026-07-10):** The implemented platform keeps a
+> **serial chain** `payment-service → fraud-service → financial-core (ledger) → notification-service`
+> because ledger posting depends on the fraud decision. The parallel-consumer diagrams below
+> (Risk Engine, Wallet Projector, etc.) are the target design for future services and run
+> **alongside** the serial chain, not as a replacement. Preserving the serial order is a
+> product decision recorded in `PLAN-phase9-alignment.md` (OQ-C).
+
 ---
 
 ## 1. Payment Success Flow (Happy Path)

@@ -1,14 +1,13 @@
 package com.paymentapi.paymentservice.dto;
 
 import com.paymentapi.paymentservice.entity.Payment;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
 public record PaymentResponse(
     UUID paymentId,
     String status,
-    BigDecimal amount,
+    long amount,   // minor currency units (cents)
     String currency,
     String merchantId,
     String customerId,

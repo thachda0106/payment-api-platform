@@ -16,22 +16,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Double-entry ledger service.
- * Each payment generates 3 journal entries linked by ledger_transaction_id.
+ * Double-entry ledger service. All amounts are in minor currency units (cents).
  *
  * Invariant: SUM(credit) - SUM(debit) = 0 for each ledger_transaction_id.
  *
- * Example for $100 payment with 3% fee:
- *   Customer Wallet      -$100.00   (DEBIT)
- *   Merchant Payable     +$97.00    (CREDIT)
- *   Platform Fee Revenue +$3.00     (CREDIT)
- *   Total: -100 + 97 + 3 = 0 ✓
+ * Example for a 10000-cent ($100.00) payment with a 3% fee (300 cents):
+ *   Customer Wallet      -10000   (DEBIT)
+ *   Merchant Payable     + 9700   (CREDIT)
+ *   Platform Fee Revenue +  300   (CREDIT)
+ *   Total: -10000 + 9700 + 300 = 0 ✓
  */
 @Service
 public class LedgerService {
     private static final Logger log = LoggerFactory.getLogger(LedgerService.class);
     private static final BigDecimal FEE_RATE = new BigDecimal("0.03");
-    private static final int SCALE = 4;
 
     private final AccountRepository accountRepo;
     private final JournalEntryRepository journalEntryRepo;
@@ -42,30 +40,27 @@ public class LedgerService {
     }
 
     @Transactional
-    public Optional<UUID> postPayment(UUID paymentId, String customerId, String merchantId, BigDecimal amount) {
+    public Optional<UUID> postPayment(UUID paymentId, String customerId, String merchantId, long amount) {
         if (journalEntryRepo.existsByPaymentId(paymentId)) {
             log.info("Payment {} already posted to ledger — idempotent no-op", paymentId);
             return journalEntryRepo.findFirstByPaymentId(paymentId)
                 .map(JournalEntry::getLedgerTransactionId);
         }
-        BigDecimal fee = amount.multiply(FEE_RATE).setScale(SCALE, RoundingMode.HALF_UP);
-        BigDecimal merchantAmount = amount.subtract(fee);
+
+        long fee = BigDecimal.valueOf(amount).multiply(FEE_RATE)
+            .setScale(0, RoundingMode.HALF_UP).longValueExact();
+        long merchantAmount = amount - fee;
 
         UUID ledgerTxnId = UUID.randomUUID();
 
-        // Get or create accounts
         Account customerWallet = getOrCreateAccount(customerId, AccountType.CUSTOMER_WALLET);
         Account merchantPayable = getOrCreateAccount(merchantId, AccountType.MERCHANT_PAYABLE);
         Account platformFee = getOrCreateAccount("PLATFORM", AccountType.PLATFORM_FEE_REVENUE);
 
         // Double-entry: debit customer, credit merchant, credit platform
-        // ─────────────────────────────────────────────────────────────
-        debit(customerWallet, amount, paymentId, ledgerTxnId,
-            "Payment to " + merchantId);
-        credit(merchantPayable, merchantAmount, paymentId, ledgerTxnId,
-            "Payment from " + customerId);
-        credit(platformFee, fee, paymentId, ledgerTxnId,
-            "Processing fee for payment " + paymentId);
+        debit(customerWallet, amount, paymentId, ledgerTxnId, "Payment to " + merchantId);
+        credit(merchantPayable, merchantAmount, paymentId, ledgerTxnId, "Payment from " + customerId);
+        credit(platformFee, fee, paymentId, ledgerTxnId, "Processing fee for payment " + paymentId);
 
         log.info("Ledger posted: txn={} payment={} amount={} fee={}",
             ledgerTxnId, paymentId, amount, fee);
@@ -73,44 +68,34 @@ public class LedgerService {
         return Optional.of(ledgerTxnId);
     }
 
-    private void debit(Account account, BigDecimal amount, UUID paymentId,
-                       UUID ledgerTxnId, String desc) {
-        BigDecimal before = account.getBalance();
-        BigDecimal after = before.subtract(amount);
-
+    private void debit(Account account, long amount, UUID paymentId, UUID ledgerTxnId, String desc) {
+        long before = account.getBalance();
+        long after = before - amount;
         account.setBalance(after);
         accountRepo.save(account);
-
-        JournalEntry entry = new JournalEntry();
-        entry.setLedgerTransactionId(ledgerTxnId);
-        entry.setPaymentId(paymentId);
-        entry.setAccountId(account.getId());
-        entry.setEntryType("DEBIT");
-        entry.setAmount(amount);
-        entry.setBalanceBefore(before);
-        entry.setBalanceAfter(after);
-        entry.setDescription(desc);
-        journalEntryRepo.save(entry);
+        journalEntryRepo.save(entry(account, "DEBIT", amount, before, after, paymentId, ledgerTxnId, desc));
     }
 
-    private void credit(Account account, BigDecimal amount, UUID paymentId,
-                        UUID ledgerTxnId, String desc) {
-        BigDecimal before = account.getBalance();
-        BigDecimal after = before.add(amount);
-
+    private void credit(Account account, long amount, UUID paymentId, UUID ledgerTxnId, String desc) {
+        long before = account.getBalance();
+        long after = before + amount;
         account.setBalance(after);
         accountRepo.save(account);
+        journalEntryRepo.save(entry(account, "CREDIT", amount, before, after, paymentId, ledgerTxnId, desc));
+    }
 
-        JournalEntry entry = new JournalEntry();
-        entry.setLedgerTransactionId(ledgerTxnId);
-        entry.setPaymentId(paymentId);
-        entry.setAccountId(account.getId());
-        entry.setEntryType("CREDIT");
-        entry.setAmount(amount);
-        entry.setBalanceBefore(before);
-        entry.setBalanceAfter(after);
-        entry.setDescription(desc);
-        journalEntryRepo.save(entry);
+    private JournalEntry entry(Account account, String type, long amount, long before, long after,
+                               UUID paymentId, UUID ledgerTxnId, String desc) {
+        JournalEntry e = new JournalEntry();
+        e.setLedgerTransactionId(ledgerTxnId);
+        e.setPaymentId(paymentId);
+        e.setAccountId(account.getId());
+        e.setEntryType(type);
+        e.setAmount(amount);
+        e.setBalanceBefore(before);
+        e.setBalanceAfter(after);
+        e.setDescription(desc);
+        return e;
     }
 
     private Account getOrCreateAccount(String externalRef, AccountType type) {
@@ -119,7 +104,7 @@ public class LedgerService {
                 Account a = new Account();
                 a.setExternalRef(externalRef);
                 a.setAccountType(type);
-                a.setBalance(BigDecimal.ZERO);
+                a.setBalance(0L);
                 return accountRepo.save(a);
             });
     }

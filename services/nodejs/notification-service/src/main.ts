@@ -13,7 +13,7 @@ import { Pool } from "pg";
 import { loadConfig } from "@payment-api/platform-libs/config";
 import { initTelemetry } from "@payment-api/platform-libs/telemetry";
 import { healthPlugin, CachedDependencyRegistry } from "@payment-api/platform-libs/health";
-import { NotificationConsumer, NotificationOutboxPoller } from "./consumer";
+import { NotificationConsumer, InboxRetryScheduler } from "./consumer";
 
 async function start() {
   // 1. Load config (fails fast on missing required values)
@@ -52,16 +52,27 @@ async function start() {
   }
 
   let consumer: NotificationConsumer | null = null;
-  let poller: NotificationOutboxPoller | null = null;
+  let retryScheduler: InboxRetryScheduler | null = null;
   let kafkaReady = false;
   if (config.kafka && pool) {
+    const securityProtocol = process.env.KAFKA_SECURITY_PROTOCOL ?? "PLAINTEXT";
     const kafka = new Kafka({
       clientId: config.otel.serviceName,
       brokers: config.kafka.bootstrapServers.split(","),
       logLevel: logLevel.NOTHING,
+      ...(securityProtocol.startsWith("SASL")
+        ? {
+            sasl: {
+              mechanism: "plain" as const,
+              username: process.env.KAFKA_SASL_USERNAME ?? "",
+              password: process.env.KAFKA_SASL_PASSWORD ?? "",
+            },
+          }
+        : {}),
     });
-    consumer = new NotificationConsumer(kafka, pool);
-    poller = new NotificationOutboxPoller(pool, kafka.producer());
+    const registryUrl = process.env.SCHEMA_REGISTRY_URL ?? "http://schema-registry:8081";
+    consumer = new NotificationConsumer(kafka, pool, registryUrl);
+    retryScheduler = new InboxRetryScheduler(kafka, pool);
     registry.register("kafka", () => kafkaReady);
   }
 
@@ -81,7 +92,7 @@ async function start() {
     app.log.info("Notification Service shutting down gracefully...");
     try {
       if (consumer) await consumer.shutdown();
-      if (poller) await poller.shutdown();
+      if (retryScheduler) await retryScheduler.shutdown();
       if (pool) await pool.end();
     } catch (err) {
       app.log.error(err);
@@ -98,11 +109,11 @@ async function start() {
     await app.listen({ port: config.server.port, host: config.server.host });
     app.log.info(`Notification Service listening on ${config.server.host}:${config.server.port}`);
 
-    if (poller) await poller.start();
     if (consumer) {
       await consumer.start();
+      if (retryScheduler) await retryScheduler.start();
       kafkaReady = true;
-      app.log.info("notification-service event pipeline started");
+      app.log.info("notification-service consumer + retry scheduler started (Avro)");
     }
   } catch (err) {
     app.log.error(err);

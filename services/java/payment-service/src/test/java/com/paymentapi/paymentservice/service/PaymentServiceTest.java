@@ -7,7 +7,6 @@ import com.paymentapi.paymentservice.repository.PaymentRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,14 +21,14 @@ class PaymentServiceTest {
     private final PaymentService service = new PaymentService(paymentRepo, writer);
 
     private CreatePaymentRequest request() {
-        return new CreatePaymentRequest(new BigDecimal("99.99"), "USD", "m1", "c1");
+        return new CreatePaymentRequest(9999L, "USD", "m1", "c1");
     }
 
     private Payment payment(UUID id) {
         Payment p = new Payment();
         p.setId(id);
         p.setIdempotencyKey("key-1");
-        p.setAmount(new BigDecimal("99.99"));
+        p.setAmount(9999L);
         p.setCurrency("USD");
         p.setMerchantId("m1");
         p.setCustomerId("c1");

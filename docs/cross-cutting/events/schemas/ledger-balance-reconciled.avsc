@@ -1,0 +1,71 @@
+{
+  "type": "record",
+  "name": "LedgerBalanceReconciled",
+  "namespace": "com.paymentplatform.ledger",
+  "doc": "Ledger balance reconciled. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "ledger.balance.reconciled"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "LedgerBalanceReconciledData",
+        "fields": [
+          {
+            "name": "account_id",
+            "type": "string"
+          },
+          {
+            "name": "reconciled_balance",
+            "type": "long",
+            "doc": "minor units"
+          },
+          {
+            "name": "currency",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

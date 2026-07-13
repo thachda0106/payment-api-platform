@@ -17,8 +17,20 @@ spring:
     show-sql: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    properties:
+      security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
     consumer:
       group-id: ${KAFKA_CONSUMER_GROUP:financial-core}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      auto-offset-reset: earliest
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://schema-registry:8081}
+        specific.avro.reader: false
+        basic.auth.credentials.source: ${SR_BASIC_AUTH_SOURCE:}
+        schema.registry.basic.auth.user.info: ${SR_BASIC_AUTH_USER_INFO:}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer

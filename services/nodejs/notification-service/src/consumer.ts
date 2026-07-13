@@ -1,151 +1,173 @@
 /**
- * Kafka consumer + transactional outbox for notification-service.
+ * Kafka consumer (Avro) + inbox pattern for notification-service (Phase-9 P2).
  *
- * Consumes LedgerEntryCreated events from `ledger-events`, records the notification,
- * and writes a `notification_outbox` row — all in a SINGLE DB transaction
- * (atomic idempotency + no dual-write). A poller drains `notification_outbox` to
- * the `notification-events` topic.
+ * Consumes `ledger.entry.committed` (Avro/CloudEvents), records a notification, and
+ * writes an `email.queued` CloudEvents envelope to the CDC `outbox`. Inbox pattern:
+ *   1. decode + normalize → claim inbox (PENDING); kafkajs commits offset on resolve
+ *   2. process (notification insert + outbox + mark COMPLETED) in one transaction
+ *   3. on failure mark FAILED; InboxRetryScheduler retries with backoff → DLQ
  */
 
 import { Kafka, Producer, logLevel } from 'kafkajs';
-import { Pool } from 'pg';
+import { SchemaRegistry } from '@kafkajs/confluent-schema-registry';
+import { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
 
-const SOURCE_TOPIC = 'ledger-events';
-const OUTBOX_TOPIC = 'notification-events';
-const DLQ_TOPIC = 'ledger-events-dlq';
+const SOURCE_TOPIC = 'ledger.entry.committed';
+const EVENT_TYPE = 'email.queued';
+const EVENT_TOPIC = 'notifications.email.queued';
+const DLQ_TOPIC = 'ledger.dlq';
 const CONSUMER_GROUP = 'notification-service';
-const POLL_INTERVAL_MS = 1000;
-const POLL_BATCH_SIZE = 100;
+const MAX_RETRIES = 5;
+const RETRY_INTERVAL_MS = 5000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface LedgerEvent {
+interface Normalized {
   eventId: string;
-  type: string;
   paymentId: string;
-  ledgerTransactionId: string;
   customerId: string;
-  amount: string;
-  currency?: string;
-  timestamp: string;
+  amountMinor: number | null;
+  currency: string | null;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class EventValidationError extends Error {}
 
+export function normalizeLedgerEvent(event: any): Normalized {
+  const data = event?.data ?? {};
+  const n: Normalized = {
+    eventId: event?.id,
+    paymentId: data.payment_id,
+    customerId: data.customer_id,
+    amountMinor: data.amount ?? null,
+    currency: data.currency ?? null,
+  };
+  if (!n.eventId) throw new EventValidationError('missing id');
+  if (!n.paymentId || !UUID_RE.test(n.paymentId)) throw new EventValidationError('payment_id not a UUID');
+  if (!n.customerId) throw new EventValidationError('missing customer_id');
+  return n;
+}
 
-export function validateLedgerEvent(e: Partial<LedgerEvent>): asserts e is LedgerEvent {
-  if (!e.eventId) throw new EventValidationError('missing eventId');
-  if (!e.paymentId || !UUID_RE.test(e.paymentId)) throw new EventValidationError('paymentId not a UUID');
-  if (e.amount === undefined || Number(e.amount) <= 0 || Number.isNaN(Number(e.amount))) {
-    throw new EventValidationError(`amount must be > 0: ${e.amount}`);
+export class NotificationProcessor {
+  constructor(private db: Pool) {}
+
+  /** notifications insert + outbox (email.queued) + mark inbox COMPLETED in one tx. */
+  async process(n: Normalized): Promise<void> {
+    const client: PoolClient = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const email = `${n.customerId}@example.com`;
+      await client.query(
+        `INSERT INTO notifications (id, payment_id, recipient_email, template, status, sent_at)
+         VALUES ($1, $2, $3, $4, 'SENT', now())`,
+        [randomUUID(), n.paymentId, email, 'payment_receipt']
+      );
+      const outId = randomUUID();
+      const envelope = {
+        id: outId, type: EVENT_TYPE, time: new Date().toISOString(),
+        data: {
+          payment_id: n.paymentId, recipient_email: email, template: 'payment_receipt',
+          amount: n.amountMinor, currency: n.currency,
+        },
+        trigger: { service: 'notification-service', instance: '', request_id: '', idempotency_key: '' },
+      };
+      await client.query(
+        `INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, event_topic, payload, partition_key)
+         VALUES ($1, 'payment', $2, $3, $4, $5::jsonb, $2)`,
+        [outId, n.paymentId, EVENT_TYPE, EVENT_TOPIC, JSON.stringify(envelope)]
+      );
+      await client.query(
+        `UPDATE consumer_inbox SET status='COMPLETED', updated_at=now()
+         WHERE event_id=$1::uuid AND consumer_group=$2`,
+        [n.eventId, CONSUMER_GROUP]
+      );
+      await client.query('COMMIT');
+      console.log(`Notification recorded for payment ${n.paymentId}`);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
-  if (!e.customerId) throw new EventValidationError('missing customerId');
 }
 
 export class NotificationConsumer {
   private consumer;
   private dlqProducer: Producer;
-  private db: Pool;
+  private registry: SchemaRegistry;
+  private processor: NotificationProcessor;
 
-  constructor(kafka: Kafka, db: Pool) {
+  constructor(kafka: Kafka, private db: Pool, registryUrl: string) {
     this.consumer = kafka.consumer({ groupId: CONSUMER_GROUP });
     this.dlqProducer = kafka.producer();
-    this.db = db;
+    const srUser = process.env.SR_BASIC_AUTH_USER;
+    this.registry = new SchemaRegistry({
+      host: registryUrl,
+      ...(srUser ? { auth: { username: srUser, password: process.env.SR_BASIC_AUTH_PASS ?? "" } } : {}),
+    });
+    this.processor = new NotificationProcessor(db);
   }
 
   async start(): Promise<void> {
     await this.consumer.connect();
     await this.dlqProducer.connect();
     await this.consumer.subscribe({ topic: SOURCE_TOPIC, fromBeginning: true });
-
     await this.consumer.run({
       eachMessage: async ({ message }) => {
-        let event: LedgerEvent;
+        let n: Normalized;
         try {
-          const parsed = JSON.parse(message.value!.toString());
-          validateLedgerEvent(parsed);
-          event = parsed;
+          const decoded = await this.registry.decode(message.value!);
+          n = normalizeLedgerEvent(decoded);
         } catch (err) {
           console.error('Invalid ledger event → DLQ:', err);
-          await this.sendToDlq(message.value!.toString(), String(err));
-          return;
+          await this.sendToDlq(message.value, String(err));
+          return; // offset commits (kafkajs) — poison skipped
         }
-        await this.handle(event);
+        const status = await this.claim(n);
+        if (status === 'COMPLETED') return;
+        try {
+          await this.processor.process(n);
+        } catch (err) {
+          console.error(`Processing failed for ${n.eventId} (will retry):`, err);
+          await this.markFailed(n.eventId, String(err));
+        }
       },
     });
   }
 
-  private async sendToDlq(rawMessage: string, reason: string): Promise<void> {
+  private async claim(n: Normalized): Promise<string> {
+    await this.db.query(
+      `INSERT INTO consumer_inbox (event_id, consumer_group, status, payload)
+       VALUES ($1::uuid, $2, 'PENDING', $3::jsonb)
+       ON CONFLICT (event_id, consumer_group) DO NOTHING`,
+      [n.eventId, CONSUMER_GROUP, JSON.stringify(n)]
+    );
+    const r = await this.db.query(
+      `SELECT status FROM consumer_inbox WHERE event_id=$1::uuid AND consumer_group=$2`,
+      [n.eventId, CONSUMER_GROUP]
+    );
+    return r.rows[0].status;
+  }
+
+  private async markFailed(eventId: string, error: string): Promise<void> {
+    await this.db.query(
+      `UPDATE consumer_inbox SET status='FAILED', last_error=$1, updated_at=now()
+       WHERE event_id=$2::uuid AND consumer_group=$3`,
+      [error.slice(0, 1000), eventId, CONSUMER_GROUP]
+    );
+  }
+
+  private async sendToDlq(raw: Buffer | null, reason: string): Promise<void> {
     try {
       await this.dlqProducer.send({
         topic: DLQ_TOPIC,
-        messages: [{
-          value: JSON.stringify({
-            error: reason,
-            consumer: CONSUMER_GROUP,
-            timestamp: new Date().toISOString(),
-            original: rawMessage,
-          }),
-        }],
+        messages: [{ value: JSON.stringify({
+          error: reason, consumer: CONSUMER_GROUP, timestamp: new Date().toISOString(),
+          original_hex: raw ? raw.toString('hex') : null,
+        }) }],
       });
     } catch (e) {
       console.error('Failed to send to DLQ:', e);
-    }
-  }
-
-  private async handle(event: LedgerEvent): Promise<void> {
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-
-      // Atomic idempotency — dedup mark shares the transaction with the writes.
-      const dedup = await client.query(
-        `INSERT INTO processed_events (event_id, consumer_group, processed_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (event_id, consumer_group) DO NOTHING
-         RETURNING event_id`,
-        [event.eventId, CONSUMER_GROUP]
-      );
-      if (dedup.rowCount === 0) {
-        await client.query('COMMIT');
-        console.log(`Duplicate event ${event.eventId} — skipping`);
-        return;
-      }
-
-      // Send receipt (mock — real implementation uses nodemailer).
-      const email = `${event.customerId}@example.com`;
-      console.log(`Sending receipt to ${email} for payment ${event.paymentId} amount ${event.amount}`);
-
-      await client.query(
-        `INSERT INTO notifications (id, payment_id, recipient_email, template, status, sent_at)
-         VALUES ($1, $2, $3, $4, 'SENT', now())`,
-        [randomUUID(), event.paymentId, email, 'payment_receipt']
-      );
-
-      const outEventId = randomUUID();
-      const payload = {
-        v: 1,
-        eventId: outEventId,
-        type: 'NotificationSent',
-        paymentId: event.paymentId,
-        recipientEmail: email,
-        amount: event.amount,
-        currency: event.currency ?? null,
-        timestamp: new Date().toISOString(),
-      };
-      await client.query(
-        `INSERT INTO notification_outbox (event_id, aggregate_id, event_type, payload)
-         VALUES ($1, $2, $3, $4::jsonb)`,
-        [outEventId, event.paymentId, 'NotificationSent', JSON.stringify(payload)]
-      );
-
-      await client.query('COMMIT');
-      console.log(`Notification recorded for payment ${event.paymentId}`);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err; // transient — kafkajs redelivers; dedup makes reprocessing safe
-    } finally {
-      client.release();
     }
   }
 
@@ -155,57 +177,52 @@ export class NotificationConsumer {
   }
 }
 
-export class NotificationOutboxPoller {
-  private db: Pool;
-  private producer: Producer;
+export class InboxRetryScheduler {
   private timer: NodeJS.Timeout | null = null;
-  private draining = false;
+  private producer: Producer;
+  private processor: NotificationProcessor;
 
-  constructor(db: Pool, producer: Producer) {
-    this.db = db;
-    this.producer = producer;
+  constructor(kafka: Kafka, private db: Pool) {
+    this.producer = kafka.producer();
+    this.processor = new NotificationProcessor(db);
   }
 
   async start(): Promise<void> {
     await this.producer.connect();
-    this.timer = setInterval(() => void this.drain(), POLL_INTERVAL_MS);
+    this.timer = setInterval(() => void this.tick(), RETRY_INTERVAL_MS);
   }
 
-  async backlog(): Promise<number> {
-    const res = await this.db.query('SELECT count(*)::int AS n FROM notification_outbox WHERE published_at IS NULL');
-    return res.rows[0].n;
-  }
-
-  private async drain(): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
-    const client = await this.db.connect();
-    try {
-      await client.query('BEGIN');
-      const rows = await client.query(
-        `SELECT id, aggregate_id, payload
-         FROM notification_outbox
-         WHERE published_at IS NULL
-         ORDER BY created_at, id
-         FOR UPDATE SKIP LOCKED
-         LIMIT $1`,
-        [POLL_BATCH_SIZE]
-      );
-      for (const row of rows.rows) {
-        await this.producer.send({
-          topic: OUTBOX_TOPIC,
-          messages: [{ key: String(row.aggregate_id), value: JSON.stringify(row.payload) }],
-        });
-        await client.query('UPDATE notification_outbox SET published_at = now() WHERE id = $1', [row.id]);
+  private async tick(): Promise<void> {
+    const due = await this.db.query(
+      `SELECT event_id::text AS id, payload::text AS payload FROM consumer_inbox
+       WHERE consumer_group=$1 AND status='FAILED' AND retry_count < $2
+         AND updated_at < now() - (power(2, retry_count) * interval '1 second')
+       ORDER BY updated_at LIMIT 50`,
+      [CONSUMER_GROUP, MAX_RETRIES]
+    );
+    for (const row of due.rows) {
+      try {
+        await this.processor.process(JSON.parse(row.payload));
+      } catch (err) {
+        await this.db.query(
+          `UPDATE consumer_inbox SET retry_count=retry_count+1, last_error=$1, updated_at=now()
+           WHERE event_id=$2::uuid AND consumer_group=$3`,
+          [String(err).slice(0, 1000), row.id, CONSUMER_GROUP]
+        );
       }
-      await client.query('COMMIT');
-      if (rows.rowCount) console.log(`Published ${rows.rowCount} notification-events`);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      console.error('notification outbox drain failed:', err);
-    } finally {
-      client.release();
-      this.draining = false;
+    }
+    const exhausted = await this.db.query(
+      `SELECT event_id::text AS id, payload::text AS payload FROM consumer_inbox
+       WHERE consumer_group=$1 AND status='FAILED' AND retry_count >= $2 ORDER BY updated_at LIMIT 50`,
+      [CONSUMER_GROUP, MAX_RETRIES]
+    );
+    for (const row of exhausted.rows) {
+      await this.producer.send({ topic: DLQ_TOPIC, messages: [{ value: row.payload }] });
+      await this.db.query(
+        `UPDATE consumer_inbox SET status='DLQ', updated_at=now() WHERE event_id=$1::uuid AND consumer_group=$2`,
+        [row.id, CONSUMER_GROUP]
+      );
+      console.error(`Event ${row.id} exhausted retries — routed to ${DLQ_TOPIC}`);
     }
   }
 

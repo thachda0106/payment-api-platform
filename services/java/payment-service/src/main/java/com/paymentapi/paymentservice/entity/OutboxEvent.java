@@ -5,55 +5,52 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Transactional outbox event.
- * eventId: unique per event — used for consumer dedup in processed_events.
- * aggregateId: paymentId — used as Kafka message key for partition ordering.
- * One payment can produce multiple events (Created, Captured, Refunded),
- * each with its own eventId but sharing the same aggregateId.
+ * Debezium CDC outbox row (Phase-9). One row = one CloudEvents envelope to publish.
+ * `id` is the CloudEvents id / consumer dedup key; `partitionKey` is the Kafka key
+ * (paymentId) for ordering; `eventTopic` names the destination topic (EventRouter).
  */
 @Entity
-@Table(name = "payment_outbox")
+@Table(name = "outbox")
 public class OutboxEvent {
     @Id @GeneratedValue
     private UUID id;
 
-    @Column(unique = true, nullable = false)
-    private UUID eventId;
+    @Column(name = "aggregate_type", nullable = false)
+    private String aggregateType;
 
-    @Column(nullable = false)
-    private UUID aggregateId;
+    @Column(name = "aggregate_id", nullable = false)
+    private String aggregateId;
 
-    @Column(nullable = false, length = 100)
+    @Column(name = "event_type", nullable = false)
     private String eventType;
+
+    @Column(name = "event_topic", nullable = false)
+    private String eventTopic;
 
     @Column(nullable = false, columnDefinition = "jsonb")
     private String payload;
 
-    @Column(length = 64)
-    private String traceId;
+    @Column(name = "partition_key", nullable = false)
+    private String partitionKey;
 
+    @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
-    private Instant publishedAt;
-
-    @PrePersist
-    void generateEventId() {
-        if (this.eventId == null) this.eventId = UUID.randomUUID();
-    }
 
     // ─── Getters/Setters ───
     public UUID getId() { return id; }
     public void setId(UUID v) { this.id = v; }
-    public UUID getEventId() { return eventId; }
-    public void setEventId(UUID v) { this.eventId = v; }
-    public UUID getAggregateId() { return aggregateId; }
-    public void setAggregateId(UUID v) { this.aggregateId = v; }
+    public String getAggregateType() { return aggregateType; }
+    public void setAggregateType(String v) { this.aggregateType = v; }
+    public String getAggregateId() { return aggregateId; }
+    public void setAggregateId(String v) { this.aggregateId = v; }
     public String getEventType() { return eventType; }
     public void setEventType(String v) { this.eventType = v; }
+    public String getEventTopic() { return eventTopic; }
+    public void setEventTopic(String v) { this.eventTopic = v; }
     public String getPayload() { return payload; }
     public void setPayload(String v) { this.payload = v; }
-    public String getTraceId() { return traceId; }
-    public void setTraceId(String v) { this.traceId = v; }
+    public String getPartitionKey() { return partitionKey; }
+    public void setPartitionKey(String v) { this.partitionKey = v; }
     public Instant getCreatedAt() { return createdAt; }
-    public Instant getPublishedAt() { return publishedAt; }
-    public void setPublishedAt(Instant v) { this.publishedAt = v; }
+    public void setCreatedAt(Instant v) { this.createdAt = v; }
 }

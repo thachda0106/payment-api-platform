@@ -1,0 +1,74 @@
+{
+  "type": "record",
+  "name": "AuditAction",
+  "namespace": "com.paymentplatform.platform",
+  "doc": "Platform audit record. FULL.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "audit.action"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "AuditActionData",
+        "fields": [
+          {
+            "name": "actor",
+            "type": "string"
+          },
+          {
+            "name": "action",
+            "type": "string"
+          },
+          {
+            "name": "resource",
+            "type": "string"
+          },
+          {
+            "name": "resource_id",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

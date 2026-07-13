@@ -7,7 +7,18 @@
 #   docker-compose --profile services up -d      Start infra + all services
 # ============================================================================
 
-version: "3.9"
+# Shared Kafka SASL + Schema Registry auth env (Phase-9 P4; dev-only credentials).
+x-kafka-auth-env: &kafka-auth-env
+  KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+  KAFKA_SASL_MECHANISM: PLAIN
+  KAFKA_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="svc" password="svc-secret";'
+  KAFKA_SASL_USERNAME: svc
+  KAFKA_SASL_PASSWORD: svc-secret
+  SCHEMA_REGISTRY_URL: http://schema-registry:8081
+  SR_BASIC_AUTH_SOURCE: USER_INFO
+  SR_BASIC_AUTH_USER_INFO: sr-user:sr-secret
+  SR_BASIC_AUTH_USER: sr-user
+  SR_BASIC_AUTH_PASS: sr-secret
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SERVICES
@@ -23,6 +34,15 @@ services:
     image: postgres:16-alpine
     container_name: payment-postgres
     restart: unless-stopped
+    # wal_level=logical + replication slots required for Debezium CDC (Phase-9).
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=8"
+      - "-c"
+      - "max_wal_senders=8"
     environment:
       POSTGRES_USER: payment
       POSTGRES_PASSWORD: payment
@@ -45,6 +65,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+      - ./scripts/zz-init-cdc.sh:/docker-entrypoint-initdb.d/zz-init-cdc.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payment"]
       interval: 10s
@@ -87,7 +108,7 @@ services:
     networks:
       - payment-network
 
-  # Apache Kafka 3.7 — Event streaming
+  # Apache Kafka 3.7 — Event streaming (SASL_PLAINTEXT/PLAIN auth, Phase-9 P4; dev-only creds)
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: payment-kafka
@@ -98,21 +119,28 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://kafka:9092,SASL_PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_HOST:SASL_PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Broker JAAS is provided via a mounted file (env-based listener JAAS is unreliable
+      # because the cp image converts underscores in listener names to dots).
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/broker-jaas.conf -Dzookeeper.sasl.client=false"
     ports:
       - "9092:9092"
       - "9093:9093"
     volumes:
       - kafkadata:/var/lib/kafka/data
+      - ./shared/config/kafka/broker-jaas.conf:/etc/kafka/broker-jaas.conf:ro
+      - ./shared/config/kafka/client-sasl.properties:/etc/kafka/client-sasl.properties:ro
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 --command-config /etc/kafka/client-sasl.properties >/dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -120,19 +148,31 @@ services:
     networks:
       - payment-network
 
-  # Kafka init — creates persistent DLQ topics with explicit retention
+  # Kafka init — auto-create is disabled, so ALL topics are created explicitly here.
   kafka-init-topics:
     image: confluentinc/cp-kafka:7.6.0
     container_name: payment-kafka-init
     depends_on:
       kafka:
         condition: service_healthy
+    volumes:
+      - ./shared/config/kafka/client-sasl.properties:/etc/kafka/client-sasl.properties:ro
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        echo "Creating DLQ topics..."
-        for topic in payment-events-dlq fraud-events-dlq ledger-events-dlq; do
-          kafka-topics --bootstrap-server kafka:9092 \
+        CFG="--command-config /etc/kafka/client-sasl.properties"
+        echo "Creating Phase-9 domain topics..."
+        for topic in payments.payment.created payments.payment.succeeded payments.payment.failed ledger.entry.committed notifications.email.queued; do
+          kafka-topics --bootstrap-server kafka:9092 $$CFG \
+            --create --if-not-exists \
+            --topic $$topic \
+            --partitions 3 \
+            --config cleanup.policy=delete \
+            || echo "Topic $$topic already exists (that's fine)"
+        done
+        echo "Creating per-domain DLQ topics (30-day retention)..."
+        for topic in payments.dlq ledger.dlq notifications.dlq; do
+          kafka-topics --bootstrap-server kafka:9092 $$CFG \
             --create --if-not-exists \
             --topic $$topic \
             --partitions 3 \
@@ -140,11 +180,11 @@ services:
             --config cleanup.policy=delete \
             || echo "Topic $$topic already exists (that's fine)"
         done
-        echo "DLQ topics created."
+        echo "All topics created."
     networks:
       - payment-network
 
-  # Confluent Schema Registry — Avro schema management
+  # Confluent Schema Registry — Avro schema management (SASL to Kafka + HTTP BASIC auth, P4)
   schema-registry:
     image: confluentinc/cp-schema-registry:7.6.0
     container_name: payment-schema-registry
@@ -154,10 +194,79 @@ services:
         condition: service_healthy
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: SASL_PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="svc" password="svc-secret";'
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_AUTHENTICATION_METHOD: BASIC
+      SCHEMA_REGISTRY_AUTHENTICATION_REALM: SchemaRegistry
+      SCHEMA_REGISTRY_AUTHENTICATION_ROLES: admin
+      SCHEMA_REGISTRY_OPTS: "-Djava.security.auth.login.config=/etc/schema-registry/sr-jaas.conf"
+    volumes:
+      - ./shared/config/schema-registry/sr-jaas.conf:/etc/schema-registry/sr-jaas.conf:ro
+      - ./shared/config/schema-registry/sr-users.properties:/etc/schema-registry/sr-users.properties:ro
     ports:
       - "8081:8081"
+    networks:
+      - payment-network
+
+  # Debezium / Kafka Connect — CDC outbox → Kafka (Avro via Schema Registry).
+  # Uses cp-kafka-connect (has AvroConverter) + installs the Debezium PostgreSQL
+  # connector at startup. Connectors are registered via scripts/register-connectors.sh.
+  debezium-connect:
+    image: confluentinc/cp-kafka-connect:7.6.0
+    container_name: payment-debezium-connect
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_GROUP_ID: debezium-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE: USER_INFO
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_BASIC_AUTH_USER_INFO: sr-user:sr-secret
+      CONNECT_REST_ADVERTISED_HOST_NAME: debezium-connect
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+      # SASL to Kafka (worker + producer + consumer + admin)
+      CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_SASL_MECHANISM: PLAIN
+      CONNECT_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="svc" password="svc-secret";'
+      CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
+      CONNECT_PRODUCER_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="svc" password="svc-secret";'
+      CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
+      CONNECT_CONSUMER_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="svc" password="svc-secret";'
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing Debezium PostgreSQL connector..."
+        confluent-hub install --no-prompt debezium/debezium-connector-postgresql:2.5.4
+        echo "Starting Kafka Connect..."
+        /etc/confluent/docker/run
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
     networks:
       - payment-network
 
@@ -280,8 +389,10 @@ services:
   financial-core:
     profiles: ["services"]
     build:
-      context: ./services/java/financial-core
-      dockerfile: ../../../../docker/Dockerfile.java
+      context: .
+      dockerfile: docker/Dockerfile.java
+      args:
+        SERVICE_PATH: services/java/financial-core
     container_name: payment-financial-core
     restart: unless-stopped
     depends_on:
@@ -290,6 +401,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      <<: *kafka-auth-env
       SERVER_PORT: "8080"
       DATABASE_URL: jdbc:postgresql://postgres:5432/financial_core_db
       DATABASE_USERNAME: payment
@@ -310,8 +422,10 @@ services:
   payment-service:
     profiles: ["services"]
     build:
-      context: ./services/java/payment-service
-      dockerfile: ../../../../docker/Dockerfile.java
+      context: .
+      dockerfile: docker/Dockerfile.java
+      args:
+        SERVICE_PATH: services/java/payment-service
     container_name: payment-payment-service
     restart: unless-stopped
     depends_on:
@@ -320,6 +434,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      <<: *kafka-auth-env
       SERVER_PORT: "8081"
       DATABASE_URL: jdbc:postgresql://postgres:5432/payment_db
       DATABASE_USERNAME: payment
@@ -340,8 +455,10 @@ services:
   fraud-service:
     profiles: ["services"]
     build:
-      context: ./services/python/fraud-service
-      dockerfile: ../../../../docker/Dockerfile.python
+      context: .
+      dockerfile: docker/Dockerfile.python
+      args:
+        SERVICE_PATH: services/python/fraud-service
     container_name: payment-fraud-service
     restart: unless-stopped
     depends_on:
@@ -352,6 +469,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      <<: *kafka-auth-env
       SERVER_PORT: "8000"
       DATABASE_URL: postgresql://payment:payment@postgres:5432/fraud_db
       REDIS_URL: redis://redis:6379/0
@@ -371,8 +489,10 @@ services:
   notification-service:
     profiles: ["services"]
     build:
-      context: ./services/nodejs/notification-service
-      dockerfile: ../../../../docker/Dockerfile.nodejs
+      context: .
+      dockerfile: docker/Dockerfile.nodejs
+      args:
+        SERVICE_PATH: services/nodejs/notification-service
     container_name: payment-notification-service
     restart: unless-stopped
     depends_on:
@@ -381,6 +501,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      <<: *kafka-auth-env
       SERVER_PORT: "3001"
       DATABASE_URL: postgresql://payment:payment@postgres:5432/notification_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -399,8 +520,10 @@ services:
   settlement-service:
     profiles: ["services"]
     build:
-      context: ./services/go/settlement-service
-      dockerfile: ../../../../docker/Dockerfile.go
+      context: .
+      dockerfile: docker/Dockerfile.go
+      args:
+        SERVICE_PATH: services/go/settlement-service
     container_name: payment-settlement-service
     restart: unless-stopped
     depends_on:

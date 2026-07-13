@@ -2,29 +2,7 @@ package com.paymentapi.paymentservice.repository;
 
 import com.paymentapi.paymentservice.entity.OutboxEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 public interface OutboxRepository extends JpaRepository<OutboxEvent, UUID> {
-    @Query(value = """
-        SELECT * FROM payment_outbox
-        WHERE published_at IS NULL
-        ORDER BY created_at, id
-        FOR UPDATE SKIP LOCKED
-        LIMIT :limit
-    """, nativeQuery = true)
-    List<OutboxEvent> findUnpublished(@Param("limit") int limit);
-
-    long countByPublishedAtIsNull();
-
-    @Modifying
-    @Transactional
-    @Query("UPDATE OutboxEvent e SET e.publishedAt = :now WHERE e.id IN :ids")
-    void markPublished(@Param("ids") List<UUID> ids, @Param("now") Instant now);
 }

@@ -1,7 +1,6 @@
 package com.paymentapi.financialcore.entity;
 
 import jakarta.persistence.*;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -20,8 +19,8 @@ public class Account {
     @Column(nullable = false, length = 3)
     private String currency = "USD";
 
-    @Column(nullable = false, precision = 19, scale = 4)
-    private BigDecimal balance = BigDecimal.ZERO;  // CACHED PROJECTION
+    @Column(nullable = false)
+    private long balance = 0L;  // CACHED PROJECTION, minor currency units (cents)
 
     @Version
     private Long version = 0L;
@@ -40,8 +39,8 @@ public class Account {
     public void setAccountType(AccountType v) { this.accountType = v; }
     public String getCurrency() { return currency; }
     public void setCurrency(String v) { this.currency = v; }
-    public BigDecimal getBalance() { return balance; }
-    public void setBalance(BigDecimal v) { this.balance = v; }
+    public long getBalance() { return balance; }
+    public void setBalance(long v) { this.balance = v; }
     public Long getVersion() { return version; }
     public Instant getCreatedAt() { return createdAt; }
 }

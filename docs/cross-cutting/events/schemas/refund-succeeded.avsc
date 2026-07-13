@@ -1,0 +1,75 @@
+{
+  "type": "record",
+  "name": "RefundSucceeded",
+  "namespace": "com.paymentplatform.refunds",
+  "doc": "Refund settled. BACKWARD.",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "type": "string",
+      "doc": "refund.succeeded"
+    },
+    {
+      "name": "time",
+      "type": "string"
+    },
+    {
+      "name": "data",
+      "type": {
+        "type": "record",
+        "name": "RefundSucceededData",
+        "fields": [
+          {
+            "name": "refund_id",
+            "type": "string"
+          },
+          {
+            "name": "payment_id",
+            "type": "string"
+          },
+          {
+            "name": "amount",
+            "type": "long",
+            "doc": "minor units"
+          },
+          {
+            "name": "currency",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "type": {
+        "type": "record",
+        "name": "EventTrigger",
+        "fields": [
+          {
+            "name": "service",
+            "type": "string"
+          },
+          {
+            "name": "instance",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "request_id",
+            "type": "string",
+            "default": ""
+          },
+          {
+            "name": "idempotency_key",
+            "type": "string",
+            "default": ""
+          }
+        ]
+      }
+    }
+  ]
+}

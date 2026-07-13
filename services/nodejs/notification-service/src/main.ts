@@ -71,8 +71,8 @@ async function start() {
         : {}),
     });
     const registryUrl = process.env.SCHEMA_REGISTRY_URL ?? "http://schema-registry:8081";
-    consumer = new NotificationConsumer(kafka, pool, registryUrl);
-    retryScheduler = new InboxRetryScheduler(kafka, pool);
+    consumer = new NotificationConsumer(kafka, pool, registryUrl, app.log);
+    retryScheduler = new InboxRetryScheduler(kafka, pool, app.log);
     registry.register("kafka", () => kafkaReady);
   }
 

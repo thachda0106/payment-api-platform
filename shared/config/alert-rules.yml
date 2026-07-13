@@ -20,14 +20,14 @@ groups:
           runbook: "https://github.com/payment-api-platform/docs/cross-cutting/operations/runbooks/service-down.md"
 
       - alert: DLQNotEmpty
-        expr: sum(kafka_consumergroup_lag{topic="payment-events-dlq"}) > 0
+        expr: sum(kafka_consumergroup_lag{topic=~"payments\\.dlq|ledger\\.dlq|notifications\\.dlq"}) > 0
         for: 30s
         labels:
           severity: critical
           tier: platform
         annotations:
           summary: "DLQ contains poison messages"
-          description: "payment-events-dlq has messages. Investigate and replay or discard."
+          description: "A domain DLQ has messages. Investigate and replay or discard."
           runbook: "https://github.com/payment-api-platform/docs/runbooks/dlg-growth.md"
 
       - alert: PaymentSuccessRateCritical
@@ -92,15 +92,25 @@ groups:
           runbook: "https://github.com/payment-api-platform/docs/runbooks/db-connection-exhaustion.md"
 
       - alert: OutboxBacklogGrowing
-        expr: rate(payment_outbox_created_total[15m]) > rate(payment_outbox_published_total[15m])
+        expr: debz_connector_snapshot_completed == 0 or on() (time() - outbox_created_at_max > 300)
         for: 10m
         labels:
           severity: warning
           tier: service
         annotations:
-          summary: "Outbox backlog growing — publishing slower than creation"
-          description: "OutboxPoller may be stuck or Kafka producer is slow."
+          summary: "Outbox backlog growing — Debezium may be lagging"
+          description: "Outbox rows are accumulating. Check Debezium connector health and WAL lag."
           runbook: "https://github.com/payment-api-platform/docs/runbooks/outbox-backlog-growth.md"
+
+      - alert: InboxRetryStuck
+        expr: inbox_failed_count > 5
+        for: 5m
+        labels:
+          severity: warning
+          tier: service
+        annotations:
+          summary: "{{ $value }} inbox events stuck in FAILED/DLQ on {{ $labels.service }}"
+          description: "Consumer inbox has an accumulation of unretried or exhausted events. Check the retry scheduler and DLQ."
 
       - alert: PaymentLatencyHigh
         expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="payment-service"}[5m])) > 0.3

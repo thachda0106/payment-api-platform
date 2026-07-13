@@ -13,6 +13,17 @@ import { SchemaRegistry } from '@kafkajs/confluent-schema-registry';
 import { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
 
+interface LogFn {
+  (msg: string, ...args: any[]): void;
+  (obj: object, msg: string, ...args: any[]): void;
+}
+interface LoggerLike { info: LogFn; error: LogFn; }
+
+function createNoopLogger(): LoggerLike {
+  const noop = () => {};
+  return { info: noop as any, error: noop as any };
+}
+
 const SOURCE_TOPIC = 'ledger.entry.committed';
 const EVENT_TYPE = 'email.queued';
 const EVENT_TOPIC = 'notifications.email.queued';
@@ -48,7 +59,7 @@ export function normalizeLedgerEvent(event: any): Normalized {
 }
 
 export class NotificationProcessor {
-  constructor(private db: Pool) {}
+  constructor(private db: Pool, private log: LoggerLike) {}
 
   /** notifications insert + outbox (email.queued) + mark inbox COMPLETED in one tx. */
   async process(n: Normalized): Promise<void> {
@@ -81,7 +92,7 @@ export class NotificationProcessor {
         [n.eventId, CONSUMER_GROUP]
       );
       await client.query('COMMIT');
-      console.log(`Notification recorded for payment ${n.paymentId}`);
+      this.log.info('Notification recorded for payment %s', n.paymentId);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
@@ -96,16 +107,18 @@ export class NotificationConsumer {
   private dlqProducer: Producer;
   private registry: SchemaRegistry;
   private processor: NotificationProcessor;
+  private log: LoggerLike;
 
-  constructor(kafka: Kafka, private db: Pool, registryUrl: string) {
+  constructor(kafka: Kafka, private db: Pool, registryUrl: string, log: LoggerLike = createNoopLogger()) {
     this.consumer = kafka.consumer({ groupId: CONSUMER_GROUP });
     this.dlqProducer = kafka.producer();
+    this.log = log;
     const srUser = process.env.SR_BASIC_AUTH_USER;
     this.registry = new SchemaRegistry({
       host: registryUrl,
       ...(srUser ? { auth: { username: srUser, password: process.env.SR_BASIC_AUTH_PASS ?? "" } } : {}),
     });
-    this.processor = new NotificationProcessor(db);
+    this.processor = new NotificationProcessor(db, log);
   }
 
   async start(): Promise<void> {
@@ -119,7 +132,7 @@ export class NotificationConsumer {
           const decoded = await this.registry.decode(message.value!);
           n = normalizeLedgerEvent(decoded);
         } catch (err) {
-          console.error('Invalid ledger event → DLQ:', err);
+          this.log.error('Invalid ledger event → DLQ: %s', err);
           await this.sendToDlq(message.value, String(err));
           return; // offset commits (kafkajs) — poison skipped
         }
@@ -128,7 +141,7 @@ export class NotificationConsumer {
         try {
           await this.processor.process(n);
         } catch (err) {
-          console.error(`Processing failed for ${n.eventId} (will retry):`, err);
+          this.log.error({eventId:n.eventId}, 'Processing failed (will retry)');
           await this.markFailed(n.eventId, String(err));
         }
       },
@@ -167,7 +180,7 @@ export class NotificationConsumer {
         }) }],
       });
     } catch (e) {
-      console.error('Failed to send to DLQ:', e);
+      this.log.error('Failed to send to DLQ: %s', e);
     }
   }
 
@@ -181,10 +194,12 @@ export class InboxRetryScheduler {
   private timer: NodeJS.Timeout | null = null;
   private producer: Producer;
   private processor: NotificationProcessor;
+  private log: LoggerLike;
 
-  constructor(kafka: Kafka, private db: Pool) {
+  constructor(kafka: Kafka, private db: Pool, log: LoggerLike = createNoopLogger()) {
     this.producer = kafka.producer();
-    this.processor = new NotificationProcessor(db);
+    this.processor = new NotificationProcessor(db, log);
+    this.log = log;
   }
 
   async start(): Promise<void> {
@@ -222,7 +237,7 @@ export class InboxRetryScheduler {
         `UPDATE consumer_inbox SET status='DLQ', updated_at=now() WHERE event_id=$1::uuid AND consumer_group=$2`,
         [row.id, CONSUMER_GROUP]
       );
-      console.error(`Event ${row.id} exhausted retries — routed to ${DLQ_TOPIC}`);
+      this.log.error({eventId: row.id}, 'Event exhausted retries — routed to %s', DLQ_TOPIC);
     }
   }
 
